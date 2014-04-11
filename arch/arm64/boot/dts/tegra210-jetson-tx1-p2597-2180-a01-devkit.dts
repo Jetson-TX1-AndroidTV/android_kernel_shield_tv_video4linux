@@ -17,46 +17,24 @@
 #include "tegra210-jetson-cv-base-p2597-2180-a00.dts"
 
 / {
-	model = "jetson_tx1";
-	compatible = "nvidia,jetson-cv", "nvidia,tegra210";
+	model = "foster_e";
+	compatible = "nvidia,foster-e", "nvidia,tegra210";
 	nvidia,dtsfilename = __FILE__;
+	nvidia,fastboot-usb-pid = <0xb421>;
 
-	#address-cells = <2>;
-	#size-cells = <2>;
-
-	chosen {
-		bootloader {
-			nvidia,skip-display-init;
+	firmware {
+		android {
+			compatible = "android,firmware";
+			hardware = "foster_e";
 		};
 	};
 
-	host1x {
-		dc@54200000 {
-			status = "disabled";
-		};
-
-		dc@54240000 {
-			nvidia,dc-or-node = "/host1x/sor1";
-		};
-
-		dsi {
-			status = "disabled";
-			panel-a-wuxga-8-0 {
-				status = "disabled";
-			};
-			panel-s-wqxga-10-1 {
-				status = "disabled";
-			};
-		};
+	rollback-protection {
+		status = "okay";
 	};
-
-	i2c@7000c400 {
-		lp8557-backlight-a-wuxga-8-0@2c {
+	soctherm@0x700E2000 {
+		throttle@oc3 {
 			status = "disabled";
 		};
-	};
-
-	backlight {
-		status = "disabled";
 	};
 };
