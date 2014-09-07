@@ -29,6 +29,7 @@ struct si2157_dev {
 	bool inversion;
 	u8 chiptype;
 	u32 if_frequency;
+	struct delayed_work stat_work;
 };
 
 #define SI2157_CHIPTYPE_SI2157 0
