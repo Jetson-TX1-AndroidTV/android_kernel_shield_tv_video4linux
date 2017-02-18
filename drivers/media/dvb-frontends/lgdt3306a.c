@@ -15,38 +15,29 @@
  *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *    GNU General Public License for more details.
  */
-
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-
 #include <asm/div64.h>
 #include <linux/dvb/frontend.h>
 #include "dvb_math.h"
 #include "lgdt3306a.h"
-
-
 static int debug;
 module_param(debug, int, 0644);
 MODULE_PARM_DESC(debug, "set debug level (info=1, reg=2 (or-able))");
-
 #define DBG_INFO 1
 #define DBG_REG  2
 #define DBG_DUMP 4 /* FGR - comment out to remove dump code */
-
 #define lg_debug(fmt, arg...) \
 	printk(KERN_DEBUG pr_fmt(fmt), ## arg)
-
 #define dbg_info(fmt, arg...)					\
 	do {							\
 		if (debug & DBG_INFO)				\
 			lg_debug(fmt, ## arg);			\
 	} while (0)
-
 #define dbg_reg(fmt, arg...)					\
 	do {							\
 		if (debug & DBG_REG)				\
 			lg_debug(fmt, ## arg);			\
 	} while (0)
-
 #define lg_chkerr(ret)							\
 ({									\
 	int __ret;							\
@@ -55,18 +46,16 @@ MODULE_PARM_DESC(debug, "set debug level (info=1, reg=2 (or-able))");
 		pr_err("error %d on line %d\n",	ret, __LINE__);		\
 	__ret;								\
 })
-
 struct lgdt3306a_state {
 	struct i2c_adapter *i2c_adap;
+	struct lgdt3306a_config config;
 	const struct lgdt3306a_config *cfg;
-
+	struct i2c_client *client;
 	struct dvb_frontend frontend;
-
-	fe_modulation_t current_modulation;
+	enum fe_modulation current_modulation;
 	u32 current_frequency;
 	u32 snr;
 };
-
 /*
  * LG3306A Register Usage
  *  (LG does not really name the registers, so this code does not either)
@@ -78,13 +67,11 @@ struct lgdt3306a_state {
  * 2800 -> 28FF QAM Equalizer control and status
  * 3000 -> 30FF FEC control and status
  */
-
 enum lgdt3306a_lock_status {
 	LG3306_UNLOCK       = 0x00,
 	LG3306_LOCK         = 0x01,
 	LG3306_UNKNOWN_LOCK = 0xff
 };
-
 enum lgdt3306a_neverlock_status {
 	LG3306_NL_INIT    = 0x00,
 	LG3306_NL_PROCESS = 0x01,
@@ -92,41 +79,37 @@ enum lgdt3306a_neverlock_status {
 	LG3306_NL_FAIL    = 0x03,
 	LG3306_NL_UNKNOWN = 0xff
 };
-
 enum lgdt3306a_modulation {
 	LG3306_VSB          = 0x00,
 	LG3306_QAM64        = 0x01,
 	LG3306_QAM256       = 0x02,
 	LG3306_UNKNOWN_MODE = 0xff
 };
-
 enum lgdt3306a_lock_check {
 	LG3306_SYNC_LOCK,
 	LG3306_FEC_LOCK,
 	LG3306_TR_LOCK,
 	LG3306_AGC_LOCK,
 };
-
-
 #ifdef DBG_DUMP
 static void lgdt3306a_DumpAllRegs(struct lgdt3306a_state *state);
 static void lgdt3306a_DumpRegs(struct lgdt3306a_state *state);
 #endif
-
-
 static int lgdt3306a_write_reg(struct lgdt3306a_state *state, u16 reg, u8 val)
 {
 	int ret;
+	struct i2c_adapter *i2c_adapter;
 	u8 buf[] = { reg >> 8, reg & 0xff, val };
 	struct i2c_msg msg = {
 		.addr = state->cfg->i2c_addr, .flags = 0,
 		.buf = buf, .len = 3,
 	};
-
 	dbg_reg("reg: 0x%04x, val: 0x%02x\n", reg, val);
-
-	ret = i2c_transfer(state->i2c_adap, &msg, 1);
-
+	if (state->cfg->has_tuner_i2c_adapter)
+		i2c_adapter = state->client->adapter;
+	else
+		i2c_adapter = state->i2c_adap;
+	ret = i2c_transfer(i2c_adapter, &msg, 1);
 	if (ret != 1) {
 		pr_err("error (addr %02x %02x <- %02x, err = %i)\n",
 		       msg.buf[0], msg.buf[1], msg.buf[2], ret);
@@ -137,10 +120,10 @@ static int lgdt3306a_write_reg(struct lgdt3306a_state *state, u16 reg, u8 val)
 	}
 	return 0;
 }
-
 static int lgdt3306a_read_reg(struct lgdt3306a_state *state, u16 reg, u8 *val)
 {
 	int ret;
+	struct i2c_adapter *i2c_adapter;
 	u8 reg_buf[] = { reg >> 8, reg & 0xff };
 	struct i2c_msg msg[] = {
 		{ .addr = state->cfg->i2c_addr,
@@ -148,9 +131,11 @@ static int lgdt3306a_read_reg(struct lgdt3306a_state *state, u16 reg, u8 *val)
 		{ .addr = state->cfg->i2c_addr,
 		  .flags = I2C_M_RD, .buf = val, .len = 1 },
 	};
-
-	ret = i2c_transfer(state->i2c_adap, msg, 2);
-
+	if (state->cfg->has_tuner_i2c_adapter)
+		i2c_adapter = state->client->adapter;
+	else
+		i2c_adapter = state->i2c_adap;
+	ret = i2c_transfer(i2c_adapter, msg, 2);
 	if (ret != 2) {
 		pr_err("error (addr %02x reg %04x error (ret == %i)\n",
 		       state->cfg->i2c_addr, reg, ret);
@@ -160,10 +145,8 @@ static int lgdt3306a_read_reg(struct lgdt3306a_state *state, u16 reg, u8 *val)
 			return -EREMOTEIO;
 	}
 	dbg_reg("reg: 0x%04x, val: 0x%02x\n", reg, *val);
-
 	return 0;
 }
-
 #define read_reg(state, reg)						\
 ({									\
 	u8 __val;							\
@@ -172,61 +155,47 @@ static int lgdt3306a_read_reg(struct lgdt3306a_state *state, u16 reg, u8 *val)
 		__val = 0;						\
 	__val;								\
 })
-
 static int lgdt3306a_set_reg_bit(struct lgdt3306a_state *state,
 				u16 reg, int bit, int onoff)
 {
 	u8 val;
 	int ret;
-
 	dbg_reg("reg: 0x%04x, bit: %d, level: %d\n", reg, bit, onoff);
-
 	ret = lgdt3306a_read_reg(state, reg, &val);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	val &= ~(1 << bit);
 	val |= (onoff & 1) << bit;
-
 	ret = lgdt3306a_write_reg(state, reg, val);
 	lg_chkerr(ret);
 fail:
 	return ret;
 }
-
 /* ------------------------------------------------------------------------ */
-
 static int lgdt3306a_soft_reset(struct lgdt3306a_state *state)
 {
 	int ret;
-
 	dbg_info("\n");
-
 	ret = lgdt3306a_set_reg_bit(state, 0x0000, 7, 0);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	msleep(20);
 	ret = lgdt3306a_set_reg_bit(state, 0x0000, 7, 1);
 	lg_chkerr(ret);
-
 fail:
 	return ret;
 }
-
 static int lgdt3306a_mpeg_mode(struct lgdt3306a_state *state,
 				     enum lgdt3306a_mpeg_mode mode)
 {
 	u8 val;
 	int ret;
-
 	dbg_info("(%d)\n", mode);
 	/* transport packet format - TPSENB=0x80 */
 	ret = lgdt3306a_set_reg_bit(state, 0x0071, 7,
 				     mode == LGDT3306A_MPEG_PARALLEL ? 1 : 0);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	/*
 	 * start of packet signal duration
 	 * TPSSOPBITEN=0x40; 0=byte duration, 1=bit duration
@@ -234,58 +203,43 @@ static int lgdt3306a_mpeg_mode(struct lgdt3306a_state *state,
 	ret = lgdt3306a_set_reg_bit(state, 0x0071, 6, 0);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	ret = lgdt3306a_read_reg(state, 0x0070, &val);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	val |= 0x10; /* TPCLKSUPB=0x10 */
-
 	if (mode == LGDT3306A_MPEG_PARALLEL)
 		val &= ~0x10;
-
 	ret = lgdt3306a_write_reg(state, 0x0070, val);
 	lg_chkerr(ret);
-
 fail:
 	return ret;
 }
-
 static int lgdt3306a_mpeg_mode_polarity(struct lgdt3306a_state *state,
 				       enum lgdt3306a_tp_clock_edge edge,
 				       enum lgdt3306a_tp_valid_polarity valid)
 {
 	u8 val;
 	int ret;
-
 	dbg_info("edge=%d, valid=%d\n", edge, valid);
-
 	ret = lgdt3306a_read_reg(state, 0x0070, &val);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	val &= ~0x06; /* TPCLKPOL=0x04, TPVALPOL=0x02 */
-
 	if (edge == LGDT3306A_TPCLK_RISING_EDGE)
 		val |= 0x04;
 	if (valid == LGDT3306A_TP_VALID_HIGH)
 		val |= 0x02;
-
 	ret = lgdt3306a_write_reg(state, 0x0070, val);
 	lg_chkerr(ret);
-
 fail:
 	return ret;
 }
-
 static int lgdt3306a_mpeg_tristate(struct lgdt3306a_state *state,
 				     int mode)
 {
 	u8 val;
 	int ret;
-
 	dbg_info("(%d)\n", mode);
-
 	if (mode) {
 		ret = lgdt3306a_read_reg(state, 0x0070, &val);
 		if (lg_chkerr(ret))
@@ -298,87 +252,67 @@ static int lgdt3306a_mpeg_tristate(struct lgdt3306a_state *state,
 		ret = lgdt3306a_write_reg(state, 0x0070, val);
 		if (lg_chkerr(ret))
 			goto fail;
-
 		/* AGCIFOUTENB=0x40; 1=Disable IFAGC pin */
 		ret = lgdt3306a_set_reg_bit(state, 0x0003, 6, 1);
 		if (lg_chkerr(ret))
 			goto fail;
-
 	} else {
 		/* enable IFAGC pin */
 		ret = lgdt3306a_set_reg_bit(state, 0x0003, 6, 0);
 		if (lg_chkerr(ret))
 			goto fail;
-
 		ret = lgdt3306a_read_reg(state, 0x0070, &val);
 		if (lg_chkerr(ret))
 			goto fail;
-
 		val |= 0xa8; /* enable bus */
 		ret = lgdt3306a_write_reg(state, 0x0070, val);
 		if (lg_chkerr(ret))
 			goto fail;
 	}
-
 fail:
 	return ret;
 }
-
 static int lgdt3306a_ts_bus_ctrl(struct dvb_frontend *fe, int acquire)
 {
 	struct lgdt3306a_state *state = fe->demodulator_priv;
-
 	dbg_info("acquire=%d\n", acquire);
-
 	return lgdt3306a_mpeg_tristate(state, acquire ? 0 : 1);
-
 }
-
 static int lgdt3306a_power(struct lgdt3306a_state *state,
 				     int mode)
 {
 	int ret;
-
 	dbg_info("(%d)\n", mode);
-
 	if (mode == 0) {
 		/* into reset */
 		ret = lgdt3306a_set_reg_bit(state, 0x0000, 7, 0);
 		if (lg_chkerr(ret))
 			goto fail;
-
 		/* power down */
 		ret = lgdt3306a_set_reg_bit(state, 0x0000, 0, 0);
 		if (lg_chkerr(ret))
 			goto fail;
-
 	} else {
 		/* out of reset */
 		ret = lgdt3306a_set_reg_bit(state, 0x0000, 7, 1);
 		if (lg_chkerr(ret))
 			goto fail;
-
 		/* power up */
 		ret = lgdt3306a_set_reg_bit(state, 0x0000, 0, 1);
 		if (lg_chkerr(ret))
 			goto fail;
 	}
-
 #ifdef DBG_DUMP
 	lgdt3306a_DumpAllRegs(state);
 #endif
 fail:
 	return ret;
 }
-
-
 static int lgdt3306a_set_vsb(struct lgdt3306a_state *state)
 {
 	u8 val;
 	int ret;
-
 	dbg_info("\n");
-
 	/* 0. Spectrum inversion detection manual; spectrum inverted */
 	ret = lgdt3306a_read_reg(state, 0x0002, &val);
 	val &= 0xf7; /* SPECINVAUTO Off */
@@ -386,12 +320,10 @@ static int lgdt3306a_set_vsb(struct lgdt3306a_state *state)
 	ret = lgdt3306a_write_reg(state, 0x0002, val);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	/* 1. Selection of standard mode(0x08=QAM, 0x80=VSB) */
 	ret = lgdt3306a_write_reg(state, 0x0008, 0x80);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	/* 2. Bandwidth mode for VSB(6MHz) */
 	ret = lgdt3306a_read_reg(state, 0x0009, &val);
 	val &= 0xe3;
@@ -399,151 +331,117 @@ static int lgdt3306a_set_vsb(struct lgdt3306a_state *state)
 	ret = lgdt3306a_write_reg(state, 0x0009, val);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	/* 3. QAM mode detection mode(None) */
 	ret = lgdt3306a_read_reg(state, 0x0009, &val);
 	val &= 0xfc; /* STDOPDETCMODE[1:0]=0 */
 	ret = lgdt3306a_write_reg(state, 0x0009, val);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	/* 4. ADC sampling frequency rate(2x sampling) */
 	ret = lgdt3306a_read_reg(state, 0x000d, &val);
 	val &= 0xbf; /* SAMPLING4XFEN=0 */
 	ret = lgdt3306a_write_reg(state, 0x000d, val);
 	if (lg_chkerr(ret))
 		goto fail;
-
 #if 0
 	/* FGR - disable any AICC filtering, testing only */
-
 	ret = lgdt3306a_write_reg(state, 0x0024, 0x00);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	/* AICCFIXFREQ0 NT N-1(Video rejection) */
 	ret = lgdt3306a_write_reg(state, 0x002e, 0x00);
 	ret = lgdt3306a_write_reg(state, 0x002f, 0x00);
 	ret = lgdt3306a_write_reg(state, 0x0030, 0x00);
-
 	/* AICCFIXFREQ1 NT N-1(Audio rejection) */
 	ret = lgdt3306a_write_reg(state, 0x002b, 0x00);
 	ret = lgdt3306a_write_reg(state, 0x002c, 0x00);
 	ret = lgdt3306a_write_reg(state, 0x002d, 0x00);
-
 	/* AICCFIXFREQ2 NT Co-Channel(Video rejection) */
 	ret = lgdt3306a_write_reg(state, 0x0028, 0x00);
 	ret = lgdt3306a_write_reg(state, 0x0029, 0x00);
 	ret = lgdt3306a_write_reg(state, 0x002a, 0x00);
-
 	/* AICCFIXFREQ3 NT Co-Channel(Audio rejection) */
 	ret = lgdt3306a_write_reg(state, 0x0025, 0x00);
 	ret = lgdt3306a_write_reg(state, 0x0026, 0x00);
 	ret = lgdt3306a_write_reg(state, 0x0027, 0x00);
-
 #else
 	/* FGR - this works well for HVR-1955,1975 */
-
 	/* 5. AICCOPMODE  NT N-1 Adj. */
 	ret = lgdt3306a_write_reg(state, 0x0024, 0x5A);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	/* AICCFIXFREQ0 NT N-1(Video rejection) */
 	ret = lgdt3306a_write_reg(state, 0x002e, 0x5A);
 	ret = lgdt3306a_write_reg(state, 0x002f, 0x00);
 	ret = lgdt3306a_write_reg(state, 0x0030, 0x00);
-
 	/* AICCFIXFREQ1 NT N-1(Audio rejection) */
 	ret = lgdt3306a_write_reg(state, 0x002b, 0x36);
 	ret = lgdt3306a_write_reg(state, 0x002c, 0x00);
 	ret = lgdt3306a_write_reg(state, 0x002d, 0x00);
-
 	/* AICCFIXFREQ2 NT Co-Channel(Video rejection) */
 	ret = lgdt3306a_write_reg(state, 0x0028, 0x2A);
 	ret = lgdt3306a_write_reg(state, 0x0029, 0x00);
 	ret = lgdt3306a_write_reg(state, 0x002a, 0x00);
-
 	/* AICCFIXFREQ3 NT Co-Channel(Audio rejection) */
 	ret = lgdt3306a_write_reg(state, 0x0025, 0x06);
 	ret = lgdt3306a_write_reg(state, 0x0026, 0x00);
 	ret = lgdt3306a_write_reg(state, 0x0027, 0x00);
 #endif
-
 	ret = lgdt3306a_read_reg(state, 0x001e, &val);
 	val &= 0x0f;
 	val |= 0xa0;
 	ret = lgdt3306a_write_reg(state, 0x001e, val);
-
 	ret = lgdt3306a_write_reg(state, 0x0022, 0x08);
-
 	ret = lgdt3306a_write_reg(state, 0x0023, 0xFF);
-
 	ret = lgdt3306a_read_reg(state, 0x211f, &val);
 	val &= 0xef;
 	ret = lgdt3306a_write_reg(state, 0x211f, val);
-
 	ret = lgdt3306a_write_reg(state, 0x2173, 0x01);
-
 	ret = lgdt3306a_read_reg(state, 0x1061, &val);
 	val &= 0xf8;
 	val |= 0x04;
 	ret = lgdt3306a_write_reg(state, 0x1061, val);
-
 	ret = lgdt3306a_read_reg(state, 0x103d, &val);
 	val &= 0xcf;
 	ret = lgdt3306a_write_reg(state, 0x103d, val);
-
 	ret = lgdt3306a_write_reg(state, 0x2122, 0x40);
-
 	ret = lgdt3306a_read_reg(state, 0x2141, &val);
 	val &= 0x3f;
 	ret = lgdt3306a_write_reg(state, 0x2141, val);
-
 	ret = lgdt3306a_read_reg(state, 0x2135, &val);
 	val &= 0x0f;
 	val |= 0x70;
 	ret = lgdt3306a_write_reg(state, 0x2135, val);
-
 	ret = lgdt3306a_read_reg(state, 0x0003, &val);
 	val &= 0xf7;
 	ret = lgdt3306a_write_reg(state, 0x0003, val);
-
 	ret = lgdt3306a_read_reg(state, 0x001c, &val);
 	val &= 0x7f;
 	ret = lgdt3306a_write_reg(state, 0x001c, val);
-
 	/* 6. EQ step size */
 	ret = lgdt3306a_read_reg(state, 0x2179, &val);
 	val &= 0xf8;
 	ret = lgdt3306a_write_reg(state, 0x2179, val);
-
 	ret = lgdt3306a_read_reg(state, 0x217a, &val);
 	val &= 0xf8;
 	ret = lgdt3306a_write_reg(state, 0x217a, val);
-
 	/* 7. Reset */
 	ret = lgdt3306a_soft_reset(state);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	dbg_info("complete\n");
 fail:
 	return ret;
 }
-
 static int lgdt3306a_set_qam(struct lgdt3306a_state *state, int modulation)
 {
 	u8 val;
 	int ret;
-
 	dbg_info("modulation=%d\n", modulation);
-
 	/* 1. Selection of standard mode(0x08=QAM, 0x80=VSB) */
 	ret = lgdt3306a_write_reg(state, 0x0008, 0x08);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	/* 1a. Spectrum inversion detection to Auto */
 	ret = lgdt3306a_read_reg(state, 0x0002, &val);
 	val &= 0xfb; /* SPECINV Off */
@@ -551,14 +449,12 @@ static int lgdt3306a_set_qam(struct lgdt3306a_state *state, int modulation)
 	ret = lgdt3306a_write_reg(state, 0x0002, val);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	/* 2. Bandwidth mode for QAM */
 	ret = lgdt3306a_read_reg(state, 0x0009, &val);
 	val &= 0xe3; /* STDOPDETTMODE[2:0]=0 VSB Off */
 	ret = lgdt3306a_write_reg(state, 0x0009, val);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	/* 3. : 64QAM/256QAM detection(manual, auto) */
 	ret = lgdt3306a_read_reg(state, 0x0009, &val);
 	val &= 0xfc;
@@ -566,7 +462,6 @@ static int lgdt3306a_set_qam(struct lgdt3306a_state *state, int modulation)
 	ret = lgdt3306a_write_reg(state, 0x0009, val);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	/* 3a. : 64QAM/256QAM selection for manual */
 	ret = lgdt3306a_read_reg(state, 0x101a, &val);
 	val &= 0xf8;
@@ -574,11 +469,9 @@ static int lgdt3306a_set_qam(struct lgdt3306a_state *state, int modulation)
 		val |= 0x02; /* QMDQMODE[2:0]=2=QAM64 */
 	else
 		val |= 0x04; /* QMDQMODE[2:0]=4=QAM256 */
-
 	ret = lgdt3306a_write_reg(state, 0x101a, val);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	/* 4. ADC sampling frequency rate(4x sampling) */
 	ret = lgdt3306a_read_reg(state, 0x000d, &val);
 	val &= 0xbf;
@@ -586,31 +479,25 @@ static int lgdt3306a_set_qam(struct lgdt3306a_state *state, int modulation)
 	ret = lgdt3306a_write_reg(state, 0x000d, val);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	/* 5. No AICC operation in QAM mode */
 	ret = lgdt3306a_read_reg(state, 0x0024, &val);
 	val &= 0x00;
 	ret = lgdt3306a_write_reg(state, 0x0024, val);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	/* 6. Reset */
 	ret = lgdt3306a_soft_reset(state);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	dbg_info("complete\n");
 fail:
 	return ret;
 }
-
 static int lgdt3306a_set_modulation(struct lgdt3306a_state *state,
 				   struct dtv_frontend_properties *p)
 {
 	int ret;
-
 	dbg_info("\n");
-
 	switch (p->modulation) {
 	case VSB_8:
 		ret = lgdt3306a_set_vsb(state);
@@ -621,78 +508,66 @@ static int lgdt3306a_set_modulation(struct lgdt3306a_state *state,
 	case QAM_256:
 		ret = lgdt3306a_set_qam(state, QAM_256);
 		break;
+	case QAM_AUTO:
+		ret = lgdt3306a_set_qam(state, QAM_64);
+		break;
 	default:
 		return -EINVAL;
 	}
 	if (lg_chkerr(ret))
 		goto fail;
-
 	state->current_modulation = p->modulation;
-
 fail:
 	return ret;
 }
-
 /* ------------------------------------------------------------------------ */
-
 static int lgdt3306a_agc_setup(struct lgdt3306a_state *state,
 			      struct dtv_frontend_properties *p)
 {
 	/* TODO: anything we want to do here??? */
 	dbg_info("\n");
-
 	switch (p->modulation) {
 	case VSB_8:
 		break;
 	case QAM_64:
 	case QAM_256:
+	case QAM_AUTO:
 		break;
 	default:
 		return -EINVAL;
 	}
 	return 0;
 }
-
 /* ------------------------------------------------------------------------ */
-
 static int lgdt3306a_set_inversion(struct lgdt3306a_state *state,
 				       int inversion)
 {
 	int ret;
-
 	dbg_info("(%d)\n", inversion);
-
 	ret = lgdt3306a_set_reg_bit(state, 0x0002, 2, inversion ? 1 : 0);
 	return ret;
 }
-
 static int lgdt3306a_set_inversion_auto(struct lgdt3306a_state *state,
 				       int enabled)
 {
 	int ret;
-
 	dbg_info("(%d)\n", enabled);
-
 	/* 0=Manual 1=Auto(QAM only) - SPECINVAUTO=0x04 */
 	ret = lgdt3306a_set_reg_bit(state, 0x0002, 3, enabled);
 	return ret;
 }
-
 static int lgdt3306a_spectral_inversion(struct lgdt3306a_state *state,
 				       struct dtv_frontend_properties *p,
 				       int inversion)
 {
 	int ret = 0;
-
 	dbg_info("(%d)\n", inversion);
 #if 0
 	/*
 	 * FGR - spectral_inversion defaults already set for VSB and QAM;
 	 * can enable later if desired
 	 */
-
 	ret = lgdt3306a_set_inversion(state, inversion);
-
 	switch (p->modulation) {
 	case VSB_8:
 		/* Manual only for VSB */
@@ -700,6 +575,7 @@ static int lgdt3306a_spectral_inversion(struct lgdt3306a_state *state,
 		break;
 	case QAM_64:
 	case QAM_256:
+	case QAM_AUTO:
 		/* Auto ok for QAM */
 		ret = lgdt3306a_set_inversion_auto(state, 1);
 		break;
@@ -709,44 +585,42 @@ static int lgdt3306a_spectral_inversion(struct lgdt3306a_state *state,
 #endif
 	return ret;
 }
-
 static int lgdt3306a_set_if(struct lgdt3306a_state *state,
 			   struct dtv_frontend_properties *p)
 {
 	int ret;
 	u16 if_freq_khz;
 	u8 nco1, nco2;
-
 	switch (p->modulation) {
 	case VSB_8:
 		if_freq_khz = state->cfg->vsb_if_khz;
 		break;
 	case QAM_64:
 	case QAM_256:
+	case QAM_AUTO:
 		if_freq_khz = state->cfg->qam_if_khz;
 		break;
 	default:
 		return -EINVAL;
 	}
-
 	switch (if_freq_khz) {
 	default:
-		pr_warn("IF=%d KHz is not supported, 3250 assumed\n",
+		pr_warn("IF=%d KHz is not supportted, 3250 assumed\n",
 			if_freq_khz);
 		/* fallthrough */
-	case 3250:  /* 3.25Mhz */
+	case 3250: /* 3.25Mhz */
 		nco1 = 0x34;
 		nco2 = 0x00;
 		break;
-	case 3500:  /* 3.50Mhz */
+	case 3500: /* 3.50Mhz */
 		nco1 = 0x38;
 		nco2 = 0x00;
 		break;
-	case 4000:  /* 4.00Mhz */
+	case 4000: /* 4.00Mhz */
 		nco1 = 0x40;
 		nco2 = 0x00;
 		break;
-	case 5000:  /* 5.00Mhz */
+	case 5000: /* 5.00Mhz */
 		nco1 = 0x50;
 		nco2 = 0x00;
 		break;
@@ -761,104 +635,77 @@ static int lgdt3306a_set_if(struct lgdt3306a_state *state,
 	ret = lgdt3306a_write_reg(state, 0x0011, nco2);
 	if (ret)
 		return ret;
-
 	dbg_info("if_freq=%d KHz->[%04x]\n", if_freq_khz, nco1<<8 | nco2);
-
 	return 0;
 }
-
 /* ------------------------------------------------------------------------ */
-
 static int lgdt3306a_i2c_gate_ctrl(struct dvb_frontend *fe, int enable)
 {
 	struct lgdt3306a_state *state = fe->demodulator_priv;
-
 	if (state->cfg->deny_i2c_rptr) {
 		dbg_info("deny_i2c_rptr=%d\n", state->cfg->deny_i2c_rptr);
 		return 0;
 	}
 	dbg_info("(%d)\n", enable);
-
 	/* NI2CRPTEN=0x80 */
 	return lgdt3306a_set_reg_bit(state, 0x0002, 7, enable ? 0 : 1);
 }
-
 static int lgdt3306a_sleep(struct lgdt3306a_state *state)
 {
 	int ret;
-
 	dbg_info("\n");
 	state->current_frequency = -1; /* force re-tune, when we wake */
-
 	ret = lgdt3306a_mpeg_tristate(state, 1); /* disable data bus */
 	if (lg_chkerr(ret))
 		goto fail;
-
 	ret = lgdt3306a_power(state, 0); /* power down */
 	lg_chkerr(ret);
-
 fail:
 	return 0;
 }
-
 static int lgdt3306a_fe_sleep(struct dvb_frontend *fe)
 {
 	struct lgdt3306a_state *state = fe->demodulator_priv;
-
 	return lgdt3306a_sleep(state);
 }
-
 static int lgdt3306a_init(struct dvb_frontend *fe)
 {
 	struct lgdt3306a_state *state = fe->demodulator_priv;
 	u8 val;
 	int ret;
-
 	dbg_info("\n");
-
 	/* 1. Normal operation mode */
 	ret = lgdt3306a_set_reg_bit(state, 0x0001, 0, 1); /* SIMFASTENB=0x01 */
 	if (lg_chkerr(ret))
 		goto fail;
-
 	/* 2. Spectrum inversion auto detection (Not valid for VSB) */
 	ret = lgdt3306a_set_inversion_auto(state, 0);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	/* 3. Spectrum inversion(According to the tuner configuration) */
 	ret = lgdt3306a_set_inversion(state, 1);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	/* 4. Peak-to-peak voltage of ADC input signal */
-
 	/* ADCSEL1V=0x80=1Vpp; 0x00=2Vpp */
 	ret = lgdt3306a_set_reg_bit(state, 0x0004, 7, 1);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	/* 5. ADC output data capture clock phase */
-
 	/* 0=same phase as ADC clock */
 	ret = lgdt3306a_set_reg_bit(state, 0x0004, 2, 0);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	/* 5a. ADC sampling clock source */
-
 	/* ADCCLKPLLSEL=0x08; 0=use ext clock, not PLL */
 	ret = lgdt3306a_set_reg_bit(state, 0x0004, 3, 0);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	/* 6. Automatic PLL set */
-
 	/* PLLSETAUTO=0x40; 0=off */
 	ret = lgdt3306a_set_reg_bit(state, 0x0005, 6, 0);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	if (state->cfg->xtalMHz == 24) {	/* 24MHz */
 		/* 7. Frequency for PLL output(0x2564 for 192MHz for 24MHz) */
 		ret = lgdt3306a_read_reg(state, 0x0005, &val);
@@ -872,7 +719,6 @@ static int lgdt3306a_init(struct dvb_frontend *fe)
 		ret = lgdt3306a_write_reg(state, 0x0006, 0x64);
 		if (lg_chkerr(ret))
 			goto fail;
-
 		/* 8. ADC sampling frequency(0x180000 for 24MHz sampling) */
 		ret = lgdt3306a_read_reg(state, 0x000d, &val);
 		if (lg_chkerr(ret))
@@ -882,7 +728,6 @@ static int lgdt3306a_init(struct dvb_frontend *fe)
 		ret = lgdt3306a_write_reg(state, 0x000d, val);
 		if (lg_chkerr(ret))
 			goto fail;
-
 	} else if (state->cfg->xtalMHz == 25) { /* 25MHz */
 		/* 7. Frequency for PLL output */
 		ret = lgdt3306a_read_reg(state, 0x0005, &val);
@@ -896,7 +741,6 @@ static int lgdt3306a_init(struct dvb_frontend *fe)
 		ret = lgdt3306a_write_reg(state, 0x0006, 0x64);
 		if (lg_chkerr(ret))
 			goto fail;
-
 		/* 8. ADC sampling frequency(0x190000 for 25MHz sampling) */
 		ret = lgdt3306a_read_reg(state, 0x000d, &val);
 		if (lg_chkerr(ret))
@@ -913,67 +757,52 @@ static int lgdt3306a_init(struct dvb_frontend *fe)
 	ret = lgdt3306a_write_reg(state, 0x000e, 0x00);
 	ret = lgdt3306a_write_reg(state, 0x000f, 0x00);
 #endif
-
 	/* 9. Center frequency of input signal of ADC */
 	ret = lgdt3306a_write_reg(state, 0x0010, 0x34); /* 3.25MHz */
 	ret = lgdt3306a_write_reg(state, 0x0011, 0x00);
-
 	/* 10. Fixed gain error value */
 	ret = lgdt3306a_write_reg(state, 0x0014, 0); /* gain error=0 */
-
 	/* 10a. VSB TR BW gear shift initial step */
 	ret = lgdt3306a_read_reg(state, 0x103c, &val);
 	val &= 0x0f;
 	val |= 0x20; /* SAMGSAUTOSTL_V[3:0] = 2 */
 	ret = lgdt3306a_write_reg(state, 0x103c, val);
-
 	/* 10b. Timing offset calibration in low temperature for VSB */
 	ret = lgdt3306a_read_reg(state, 0x103d, &val);
 	val &= 0xfc;
 	val |= 0x03;
 	ret = lgdt3306a_write_reg(state, 0x103d, val);
-
 	/* 10c. Timing offset calibration in low temperature for QAM */
 	ret = lgdt3306a_read_reg(state, 0x1036, &val);
 	val &= 0xf0;
 	val |= 0x0c;
 	ret = lgdt3306a_write_reg(state, 0x1036, val);
-
 	/* 11. Using the imaginary part of CIR in CIR loading */
 	ret = lgdt3306a_read_reg(state, 0x211f, &val);
 	val &= 0xef; /* do not use imaginary of CIR */
 	ret = lgdt3306a_write_reg(state, 0x211f, val);
-
 	/* 12. Control of no signal detector function */
 	ret = lgdt3306a_read_reg(state, 0x2849, &val);
 	val &= 0xef; /* NOUSENOSIGDET=0, enable no signal detector */
 	ret = lgdt3306a_write_reg(state, 0x2849, val);
-
 	/* FGR - put demod in some known mode */
 	ret = lgdt3306a_set_vsb(state);
-
 	/* 13. TP stream format */
 	ret = lgdt3306a_mpeg_mode(state, state->cfg->mpeg_mode);
-
 	/* 14. disable output buses */
 	ret = lgdt3306a_mpeg_tristate(state, 1);
-
 	/* 15. Sleep (in reset) */
 	ret = lgdt3306a_sleep(state);
 	lg_chkerr(ret);
-
 fail:
 	return ret;
 }
-
 static int lgdt3306a_set_parameters(struct dvb_frontend *fe)
 {
 	struct dtv_frontend_properties *p = &fe->dtv_property_cache;
 	struct lgdt3306a_state *state = fe->demodulator_priv;
 	int ret;
-
 	dbg_info("(%d, %d)\n", p->frequency, p->modulation);
-
 	if (state->current_frequency  == p->frequency &&
 	   state->current_modulation == p->modulation) {
 		dbg_info(" (already set, skipping ...)\n");
@@ -981,11 +810,9 @@ static int lgdt3306a_set_parameters(struct dvb_frontend *fe)
 	}
 	state->current_frequency = -1;
 	state->current_modulation = -1;
-
 	ret = lgdt3306a_power(state, 1); /* power up */
 	if (lg_chkerr(ret))
 		goto fail;
-
 	if (fe->ops.tuner_ops.set_params) {
 		ret = fe->ops.tuner_ops.set_params(fe);
 		if (fe->ops.i2c_gate_ctrl)
@@ -996,42 +823,33 @@ static int lgdt3306a_set_parameters(struct dvb_frontend *fe)
 		state->current_frequency = p->frequency;
 #endif
 	}
-
 	ret = lgdt3306a_set_modulation(state, p);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	ret = lgdt3306a_agc_setup(state, p);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	ret = lgdt3306a_set_if(state, p);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	ret = lgdt3306a_spectral_inversion(state, p,
 					state->cfg->spectral_inversion ? 1 : 0);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	ret = lgdt3306a_mpeg_mode(state, state->cfg->mpeg_mode);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	ret = lgdt3306a_mpeg_mode_polarity(state,
 					  state->cfg->tpclk_edge,
 					  state->cfg->tpvalid_polarity);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	ret = lgdt3306a_mpeg_tristate(state, 0); /* enable data bus */
 	if (lg_chkerr(ret))
 		goto fail;
-
 	ret = lgdt3306a_soft_reset(state);
 	if (lg_chkerr(ret))
 		goto fail;
-
 #ifdef DBG_DUMP
 	lgdt3306a_DumpAllRegs(state);
 #endif
@@ -1039,20 +857,16 @@ static int lgdt3306a_set_parameters(struct dvb_frontend *fe)
 fail:
 	return ret;
 }
-
 static int lgdt3306a_get_frontend(struct dvb_frontend *fe)
 {
 	struct lgdt3306a_state *state = fe->demodulator_priv;
 	struct dtv_frontend_properties *p = &fe->dtv_property_cache;
-
 	dbg_info("(%u, %d)\n",
 		 state->current_frequency, state->current_modulation);
-
 	p->modulation = state->current_modulation;
 	p->frequency = state->current_frequency;
 	return 0;
 }
-
 static enum dvbfe_algo lgdt3306a_get_frontend_algo(struct dvb_frontend *fe)
 {
 #if 1
@@ -1061,7 +875,6 @@ static enum dvbfe_algo lgdt3306a_get_frontend_algo(struct dvb_frontend *fe)
 	return DVBFE_ALGO_HW;
 #endif
 }
-
 /* ------------------------------------------------------------------------ */
 static int lgdt3306a_monitor_vsb(struct lgdt3306a_state *state)
 {
@@ -1069,34 +882,27 @@ static int lgdt3306a_monitor_vsb(struct lgdt3306a_state *state)
 	int ret;
 	u8 snrRef, maxPowerMan, nCombDet;
 	u16 fbDlyCir;
-
 	ret = lgdt3306a_read_reg(state, 0x21a1, &val);
 	if (ret)
 		return ret;
 	snrRef = val & 0x3f;
-
 	ret = lgdt3306a_read_reg(state, 0x2185, &maxPowerMan);
 	if (ret)
 		return ret;
-
 	ret = lgdt3306a_read_reg(state, 0x2191, &val);
 	if (ret)
 		return ret;
 	nCombDet = (val & 0x80) >> 7;
-
 	ret = lgdt3306a_read_reg(state, 0x2180, &val);
 	if (ret)
 		return ret;
 	fbDlyCir = (val & 0x03) << 8;
-
 	ret = lgdt3306a_read_reg(state, 0x2181, &val);
 	if (ret)
 		return ret;
 	fbDlyCir |= val;
-
 	dbg_info("snrRef=%d maxPowerMan=0x%x nCombDet=%d fbDlyCir=0x%x\n",
 		snrRef, maxPowerMan, nCombDet, fbDlyCir);
-
 	/* Carrier offset sub loop bandwidth */
 	ret = lgdt3306a_read_reg(state, 0x1061, &val);
 	if (ret)
@@ -1113,7 +919,6 @@ static int lgdt3306a_monitor_vsb(struct lgdt3306a_state *state)
 	ret = lgdt3306a_write_reg(state, 0x1061, val);
 	if (ret)
 		return ret;
-
 	/* Adjust Notch Filter */
 	ret = lgdt3306a_read_reg(state, 0x0024, &val);
 	if (ret)
@@ -1125,7 +930,6 @@ static int lgdt3306a_monitor_vsb(struct lgdt3306a_state *state)
 	ret = lgdt3306a_write_reg(state, 0x0024, val);
 	if (ret)
 		return ret;
-
 	/* VSB Timing Recovery output normalization */
 	ret = lgdt3306a_read_reg(state, 0x103d, &val);
 	if (ret)
@@ -1133,20 +937,16 @@ static int lgdt3306a_monitor_vsb(struct lgdt3306a_state *state)
 	val &= 0xcf;
 	val |= 0x20;
 	ret = lgdt3306a_write_reg(state, 0x103d, val);
-
 	return ret;
 }
-
 static enum lgdt3306a_modulation
 lgdt3306a_check_oper_mode(struct lgdt3306a_state *state)
 {
 	u8 val = 0;
 	int ret;
-
 	ret = lgdt3306a_read_reg(state, 0x0081, &val);
 	if (ret)
 		goto err;
-
 	if (val & 0x80)	{
 		dbg_info("VSB\n");
 		return LG3306_VSB;
@@ -1167,7 +967,6 @@ err:
 	pr_warn("UNKNOWN\n");
 	return LG3306_UNKNOWN_MODE;
 }
-
 static enum lgdt3306a_lock_status
 lgdt3306a_check_lock_status(struct lgdt3306a_state *state,
 			    enum lgdt3306a_lock_check whatLock)
@@ -1176,21 +975,17 @@ lgdt3306a_check_lock_status(struct lgdt3306a_state *state,
 	int ret;
 	enum lgdt3306a_modulation	modeOper;
 	enum lgdt3306a_lock_status lockStatus;
-
 	modeOper = LG3306_UNKNOWN_MODE;
-
 	switch (whatLock) {
 	case LG3306_SYNC_LOCK:
 	{
 		ret = lgdt3306a_read_reg(state, 0x00a6, &val);
 		if (ret)
 			return ret;
-
 		if ((val & 0x80) == 0x80)
 			lockStatus = LG3306_LOCK;
 		else
 			lockStatus = LG3306_UNLOCK;
-
 		dbg_info("SYNC_LOCK=%x\n", lockStatus);
 		break;
 	}
@@ -1199,12 +994,10 @@ lgdt3306a_check_lock_status(struct lgdt3306a_state *state,
 		ret = lgdt3306a_read_reg(state, 0x0080, &val);
 		if (ret)
 			return ret;
-
 		if ((val & 0x40) == 0x40)
 			lockStatus = LG3306_LOCK;
 		else
 			lockStatus = LG3306_UNLOCK;
-
 		dbg_info("AGC_LOCK=%x\n", lockStatus);
 		break;
 	}
@@ -1215,14 +1008,12 @@ lgdt3306a_check_lock_status(struct lgdt3306a_state *state,
 			ret = lgdt3306a_read_reg(state, 0x1094, &val);
 			if (ret)
 				return ret;
-
 			if ((val & 0x80) == 0x80)
 				lockStatus = LG3306_LOCK;
 			else
 				lockStatus = LG3306_UNLOCK;
 		} else
 			lockStatus = LG3306_UNKNOWN_LOCK;
-
 		dbg_info("TR_LOCK=%x\n", lockStatus);
 		break;
 	}
@@ -1233,75 +1024,60 @@ lgdt3306a_check_lock_status(struct lgdt3306a_state *state,
 			ret = lgdt3306a_read_reg(state, 0x0080, &val);
 			if (ret)
 				return ret;
-
 			if ((val & 0x10) == 0x10)
 				lockStatus = LG3306_LOCK;
 			else
 				lockStatus = LG3306_UNLOCK;
 		} else
 			lockStatus = LG3306_UNKNOWN_LOCK;
-
 		dbg_info("FEC_LOCK=%x\n", lockStatus);
 		break;
 	}
-
 	default:
 		lockStatus = LG3306_UNKNOWN_LOCK;
 		pr_warn("UNKNOWN whatLock=%d\n", whatLock);
 		break;
 	}
-
 	return lockStatus;
 }
-
 static enum lgdt3306a_neverlock_status
 lgdt3306a_check_neverlock_status(struct lgdt3306a_state *state)
 {
 	u8 val = 0;
 	int ret;
 	enum lgdt3306a_neverlock_status lockStatus;
-
 	ret = lgdt3306a_read_reg(state, 0x0080, &val);
 	if (ret)
 		return ret;
 	lockStatus = (enum lgdt3306a_neverlock_status)(val & 0x03);
-
 	dbg_info("NeverLock=%d", lockStatus);
-
 	return lockStatus;
 }
-
 static int lgdt3306a_pre_monitoring(struct lgdt3306a_state *state)
 {
 	u8 val = 0;
 	int ret;
 	u8 currChDiffACQ, snrRef, mainStrong, aiccrejStatus;
-
 	/* Channel variation */
 	ret = lgdt3306a_read_reg(state, 0x21bc, &currChDiffACQ);
 	if (ret)
 		return ret;
-
 	/* SNR of Frame sync */
 	ret = lgdt3306a_read_reg(state, 0x21a1, &val);
 	if (ret)
 		return ret;
 	snrRef = val & 0x3f;
-
 	/* Strong Main CIR */
 	ret = lgdt3306a_read_reg(state, 0x2199, &val);
 	if (ret)
 		return ret;
 	mainStrong = (val & 0x40) >> 6;
-
 	ret = lgdt3306a_read_reg(state, 0x0090, &val);
 	if (ret)
 		return ret;
 	aiccrejStatus = (val & 0xf0) >> 4;
-
 	dbg_info("snrRef=%d mainStrong=%d aiccrejStatus=%d currChDiffACQ=0x%x\n",
 		snrRef, mainStrong, aiccrejStatus, currChDiffACQ);
-
 #if 0
 	/* Dynamic ghost exists */
 	if ((mainStrong == 0) && (currChDiffACQ > 0x70))
@@ -1315,7 +1091,6 @@ static int lgdt3306a_pre_monitoring(struct lgdt3306a_state *state)
 		ret = lgdt3306a_write_reg(state, 0x2135, val);
 		if (ret)
 			return ret;
-
 		ret = lgdt3306a_read_reg(state, 0x2141, &val);
 		if (ret)
 			return ret;
@@ -1324,7 +1099,6 @@ static int lgdt3306a_pre_monitoring(struct lgdt3306a_state *state)
 		ret = lgdt3306a_write_reg(state, 0x2141, val);
 		if (ret)
 			return ret;
-
 		ret = lgdt3306a_write_reg(state, 0x2122, 0x70);
 		if (ret)
 			return ret;
@@ -1337,7 +1111,6 @@ static int lgdt3306a_pre_monitoring(struct lgdt3306a_state *state)
 		ret = lgdt3306a_write_reg(state, 0x2135, val);
 		if (ret)
 			return ret;
-
 		ret = lgdt3306a_read_reg(state, 0x2141, &val);
 		if (ret)
 			return ret;
@@ -1346,26 +1119,21 @@ static int lgdt3306a_pre_monitoring(struct lgdt3306a_state *state)
 		ret = lgdt3306a_write_reg(state, 0x2141, val);
 		if (ret)
 			return ret;
-
 		ret = lgdt3306a_write_reg(state, 0x2122, 0x40);
 		if (ret)
 			return ret;
 	}
 	return 0;
 }
-
 static enum lgdt3306a_lock_status
 lgdt3306a_sync_lock_poll(struct lgdt3306a_state *state)
 {
 	enum lgdt3306a_lock_status syncLockStatus = LG3306_UNLOCK;
 	int	i;
-
 	for (i = 0; i < 2; i++)	{
 		msleep(30);
-
 		syncLockStatus = lgdt3306a_check_lock_status(state,
 							     LG3306_SYNC_LOCK);
-
 		if (syncLockStatus == LG3306_LOCK) {
 			dbg_info("locked(%d)\n", i);
 			return LG3306_LOCK;
@@ -1374,19 +1142,15 @@ lgdt3306a_sync_lock_poll(struct lgdt3306a_state *state)
 	dbg_info("not locked\n");
 	return LG3306_UNLOCK;
 }
-
 static enum lgdt3306a_lock_status
 lgdt3306a_fec_lock_poll(struct lgdt3306a_state *state)
 {
 	enum lgdt3306a_lock_status FECLockStatus = LG3306_UNLOCK;
 	int	i;
-
 	for (i = 0; i < 2; i++)	{
 		msleep(30);
-
 		FECLockStatus = lgdt3306a_check_lock_status(state,
 							    LG3306_FEC_LOCK);
-
 		if (FECLockStatus == LG3306_LOCK) {
 			dbg_info("locked(%d)\n", i);
 			return FECLockStatus;
@@ -1395,18 +1159,14 @@ lgdt3306a_fec_lock_poll(struct lgdt3306a_state *state)
 	dbg_info("not locked\n");
 	return FECLockStatus;
 }
-
 static enum lgdt3306a_neverlock_status
 lgdt3306a_neverlock_poll(struct lgdt3306a_state *state)
 {
 	enum lgdt3306a_neverlock_status NLLockStatus = LG3306_NL_FAIL;
 	int	i;
-
 	for (i = 0; i < 5; i++) {
 		msleep(30);
-
 		NLLockStatus = lgdt3306a_check_neverlock_status(state);
-
 		if (NLLockStatus == LG3306_NL_LOCK) {
 			dbg_info("NL_LOCK(%d)\n", i);
 			return NLLockStatus;
@@ -1415,38 +1175,30 @@ lgdt3306a_neverlock_poll(struct lgdt3306a_state *state)
 	dbg_info("NLLockStatus=%d\n", NLLockStatus);
 	return NLLockStatus;
 }
-
 static u8 lgdt3306a_get_packet_error(struct lgdt3306a_state *state)
 {
 	u8 val;
 	int ret;
-
 	ret = lgdt3306a_read_reg(state, 0x00fa, &val);
 	if (ret)
 		return ret;
-
 	return val;
 }
-
 static const u32 valx_x10[] = {
 	10,  11,  13,  15,  17,  20,  25,  33,  41,  50,  59,  73,  87,  100
 };
 static const u32 log10x_x1000[] = {
 	0,   41, 114, 176, 230, 301, 398, 518, 613, 699, 771, 863, 939, 1000
 };
-
 static u32 log10_x1000(u32 x)
 {
 	u32 diff_val, step_val, step_log10;
 	u32 log_val = 0;
 	u32 i;
-
 	if (x <= 0)
 		return -1000000; /* signal error */
-
 	if (x == 10)
 		return 0; /* log(1)=0 */
-
 	if (x < 10) {
 		while (x < 10) {
 			x = x * 10;
@@ -1459,10 +1211,8 @@ static u32 log10_x1000(u32 x)
 		}
 	}
 	log_val *= 1000;
-
 	if (x == 10) /* was our input an exact multiple of 10 */
 		return log_val;	/* don't need to interpolate */
-
 	/* find our place on the log curve */
 	for (i = 1; i < ARRAY_SIZE(valx_x10); i++) {
 		if (valx_x10[i] >= x)
@@ -1470,36 +1220,28 @@ static u32 log10_x1000(u32 x)
 	}
 	if (i == ARRAY_SIZE(valx_x10))
 		return log_val + log10x_x1000[i - 1];
-
 	diff_val   = x - valx_x10[i-1];
 	step_val   = valx_x10[i] - valx_x10[i - 1];
 	step_log10 = log10x_x1000[i] - log10x_x1000[i - 1];
-
 	/* do a linear interpolation to get in-between values */
 	return log_val + log10x_x1000[i - 1] +
 		((diff_val*step_log10) / step_val);
 }
-
 static u32 lgdt3306a_calculate_snr_x100(struct lgdt3306a_state *state)
 {
-	u32 mse;  /* Mean-Square Error */
-	u32 pwr;  /* Constelation power */
+	u32 mse; /* Mean-Square Error */
+	u32 pwr; /* Constelation power */
 	u32 snr_x100;
-
 	mse = (read_reg(state, 0x00ec) << 8) |
 	      (read_reg(state, 0x00ed));
 	pwr = (read_reg(state, 0x00e8) << 8) |
 	      (read_reg(state, 0x00e9));
-
 	if (mse == 0) /* no signal */
 		return 0;
-
 	snr_x100 = log10_x1000((pwr * 10000) / mse) - 3000;
 	dbg_info("mse=%u, pwr=%u, snr_x100=%d\n", mse, pwr, snr_x100);
-
 	return snr_x100;
 }
-
 static enum lgdt3306a_lock_status
 lgdt3306a_vsb_lock_poll(struct lgdt3306a_state *state)
 {
@@ -1507,63 +1249,51 @@ lgdt3306a_vsb_lock_poll(struct lgdt3306a_state *state)
 	u8 cnt = 0;
 	u8 packet_error;
 	u32 snr;
-
 	for (cnt = 0; cnt < 10; cnt++) {
 		if (lgdt3306a_sync_lock_poll(state) == LG3306_UNLOCK) {
 			dbg_info("no sync lock!\n");
 			return LG3306_UNLOCK;
 		}
-
 		msleep(20);
 		ret = lgdt3306a_pre_monitoring(state);
 		if (ret)
 			break;
-
 		packet_error = lgdt3306a_get_packet_error(state);
 		snr = lgdt3306a_calculate_snr_x100(state);
 		dbg_info("cnt=%d errors=%d snr=%d\n", cnt, packet_error, snr);
-
 		if ((snr >= 1500) && (packet_error < 0xff))
 			return LG3306_LOCK;
 	}
-
 	dbg_info("not locked!\n");
 	return LG3306_UNLOCK;
 }
-
 static enum lgdt3306a_lock_status
 lgdt3306a_qam_lock_poll(struct lgdt3306a_state *state)
 {
 	u8 cnt;
 	u8 packet_error;
 	u32	snr;
-
 	for (cnt = 0; cnt < 10; cnt++) {
 		if (lgdt3306a_fec_lock_poll(state) == LG3306_UNLOCK) {
 			dbg_info("no fec lock!\n");
 			return LG3306_UNLOCK;
 		}
-
 		msleep(20);
-
 		packet_error = lgdt3306a_get_packet_error(state);
 		snr = lgdt3306a_calculate_snr_x100(state);
 		dbg_info("cnt=%d errors=%d snr=%d\n", cnt, packet_error, snr);
-
 		if ((snr >= 1500) && (packet_error < 0xff))
 			return LG3306_LOCK;
 	}
-
 	dbg_info("not locked!\n");
 	return LG3306_UNLOCK;
 }
-
-static int lgdt3306a_read_status(struct dvb_frontend *fe, fe_status_t *status)
+static int lgdt3306a_read_status(struct dvb_frontend *fe,
+				 enum fe_status *status)
 {
 	struct lgdt3306a_state *state = fe->demodulator_priv;
 	u16 strength = 0;
 	int ret = 0;
-
 	if (fe->ops.tuner_ops.get_rf_strength) {
 		ret = fe->ops.tuner_ops.get_rf_strength(fe, &strength);
 		if (ret == 0)
@@ -1571,19 +1301,17 @@ static int lgdt3306a_read_status(struct dvb_frontend *fe, fe_status_t *status)
 		else
 			dbg_info("fe->ops.tuner_ops.get_rf_strength() failed\n");
 	}
-
 	*status = 0;
 	if (lgdt3306a_neverlock_poll(state) == LG3306_NL_LOCK) {
 		*status |= FE_HAS_SIGNAL;
 		*status |= FE_HAS_CARRIER;
-
 		switch (state->current_modulation) {
 		case QAM_256:
 		case QAM_64:
+		case QAM_AUTO:
 			if (lgdt3306a_qam_lock_poll(state) == LG3306_LOCK) {
 				*status |= FE_HAS_VITERBI;
 				*status |= FE_HAS_SYNC;
-
 				*status |= FE_HAS_LOCK;
 			}
 			break;
@@ -1591,9 +1319,7 @@ static int lgdt3306a_read_status(struct dvb_frontend *fe, fe_status_t *status)
 			if (lgdt3306a_vsb_lock_poll(state) == LG3306_LOCK) {
 				*status |= FE_HAS_VITERBI;
 				*status |= FE_HAS_SYNC;
-
 				*status |= FE_HAS_LOCK;
-
 				ret = lgdt3306a_monitor_vsb(state);
 			}
 			break;
@@ -1603,19 +1329,14 @@ static int lgdt3306a_read_status(struct dvb_frontend *fe, fe_status_t *status)
 	}
 	return ret;
 }
-
-
 static int lgdt3306a_read_snr(struct dvb_frontend *fe, u16 *snr)
 {
 	struct lgdt3306a_state *state = fe->demodulator_priv;
-
 	state->snr = lgdt3306a_calculate_snr_x100(state);
 	/* report SNR in dB * 10 */
 	*snr = state->snr/10;
-
 	return 0;
 }
-
 static int lgdt3306a_read_signal_strength(struct dvb_frontend *fe,
 					 u16 *strength)
 {
@@ -1623,13 +1344,11 @@ static int lgdt3306a_read_signal_strength(struct dvb_frontend *fe,
 	 * Calculate some sort of "strength" from SNR
 	 */
 	struct lgdt3306a_state *state = fe->demodulator_priv;
-	u16 snr;  /* snr_x10 */
+	u16 snr; /* snr_x10 */
 	int ret;
 	u32 ref_snr; /* snr*100 */
 	u32 str;
-
 	*strength = 0;
-
 	switch (state->current_modulation) {
 	case VSB_8:
 		 ref_snr = 1600; /* 16dB */
@@ -1640,14 +1359,15 @@ static int lgdt3306a_read_signal_strength(struct dvb_frontend *fe,
 	case QAM_256:
 		 ref_snr = 2800; /* 28dB */
 		 break;
+	case QAM_AUTO:
+		 ref_snr = 2200; /* 22dB */
+		 break;
 	default:
 		return -EINVAL;
 	}
-
 	ret = fe->ops.read_snr(fe, &snr);
 	if (lg_chkerr(ret))
 		goto fail;
-
 	if (state->snr <= (ref_snr - 100))
 		str = 0;
 	else if (state->snr <= ref_snr)
@@ -1662,18 +1382,14 @@ static int lgdt3306a_read_signal_strength(struct dvb_frontend *fe,
 	}
 	*strength = (u16)str;
 	dbg_info("strength=%u\n", *strength);
-
 fail:
 	return ret;
 }
-
 /* ------------------------------------------------------------------------ */
-
 static int lgdt3306a_read_ber(struct dvb_frontend *fe, u32 *ber)
 {
 	struct lgdt3306a_state *state = fe->demodulator_priv;
 	u32 tmp;
-
 	*ber = 0;
 #if 1
 	/* FGR - FIXME - I don't know what value is expected by dvb_core
@@ -1687,11 +1403,9 @@ static int lgdt3306a_read_ber(struct dvb_frontend *fe, u32 *ber)
 #endif
 	return 0;
 }
-
 static int lgdt3306a_read_ucblocks(struct dvb_frontend *fe, u32 *ucblocks)
 {
 	struct lgdt3306a_state *state = fe->demodulator_priv;
-
 	*ucblocks = 0;
 #if 1
 	/* FGR - FIXME - I don't know what value is expected by dvb_core
@@ -1699,19 +1413,15 @@ static int lgdt3306a_read_ucblocks(struct dvb_frontend *fe, u32 *ucblocks)
 	*ucblocks = read_reg(state, 0x00f4); /* TPIFTPERRCNT[0-7] */
 	dbg_info("ucblocks=%u\n", *ucblocks);
 #endif
-
 	return 0;
 }
-
 static int lgdt3306a_tune(struct dvb_frontend *fe, bool re_tune,
 			  unsigned int mode_flags, unsigned int *delay,
-			  fe_status_t *status)
+			  enum fe_status *status)
 {
 	int ret = 0;
 	struct lgdt3306a_state *state = fe->demodulator_priv;
-
 	dbg_info("re_tune=%u\n", re_tune);
-
 	if (re_tune) {
 		state->current_frequency = -1; /* force re-tune */
 		ret = lgdt3306a_set_parameters(fe);
@@ -1720,10 +1430,8 @@ static int lgdt3306a_tune(struct dvb_frontend *fe, bool re_tune,
 	}
 	*delay = 125;
 	ret = lgdt3306a_read_status(fe, status);
-
 	return ret;
 }
-
 static int lgdt3306a_get_tune_settings(struct dvb_frontend *fe,
 				       struct dvb_frontend_tune_settings
 				       *fe_tune_settings)
@@ -1732,72 +1440,59 @@ static int lgdt3306a_get_tune_settings(struct dvb_frontend *fe,
 	dbg_info("\n");
 	return 0;
 }
-
 static int lgdt3306a_search(struct dvb_frontend *fe)
 {
-	fe_status_t status = 0;
-	int i, ret;
-
+	enum fe_status status = 0;
+	int i = 0, ret;
+	unsigned long timeout;
 	/* set frontend */
 	ret = lgdt3306a_set_parameters(fe);
 	if (ret)
 		goto error;
-
 	/* wait frontend lock */
-	for (i = 20; i > 0; i--) {
-		dbg_info(": loop=%d\n", i);
+	timeout = jiffies + msecs_to_jiffies(1000);
+	while (!time_after(jiffies, timeout)) {
+		dbg_info(": loop=%d\n", ++i);
 		msleep(50);
 		ret = lgdt3306a_read_status(fe, &status);
 		if (ret)
 			goto error;
-
 		if (status & FE_HAS_LOCK)
 			break;
 	}
-
 	/* check if we have a valid signal */
 	if (status & FE_HAS_LOCK)
 		return DVBFE_ALGO_SEARCH_SUCCESS;
 	else
 		return DVBFE_ALGO_SEARCH_AGAIN;
-
 error:
 	dbg_info("failed (%d)\n", ret);
 	return DVBFE_ALGO_SEARCH_ERROR;
 }
-
 static void lgdt3306a_release(struct dvb_frontend *fe)
 {
 	struct lgdt3306a_state *state = fe->demodulator_priv;
-
 	dbg_info("\n");
 	kfree(state);
 }
-
 static struct dvb_frontend_ops lgdt3306a_ops;
-
 struct dvb_frontend *lgdt3306a_attach(const struct lgdt3306a_config *config,
 				      struct i2c_adapter *i2c_adap)
 {
 	struct lgdt3306a_state *state = NULL;
 	int ret;
 	u8 val;
-
 	dbg_info("(%d-%04x)\n",
 	       i2c_adap ? i2c_adapter_id(i2c_adap) : 0,
 	       config ? config->i2c_addr : 0);
-
 	state = kzalloc(sizeof(struct lgdt3306a_state), GFP_KERNEL);
 	if (state == NULL)
 		goto fail;
-
 	state->cfg = config;
 	state->i2c_adap = i2c_adap;
-
 	memcpy(&state->frontend.ops, &lgdt3306a_ops,
 	       sizeof(struct dvb_frontend_ops));
 	state->frontend.demodulator_priv = state;
-
 	/* verify that we're talking to a lg3306a */
 	/* FGR - NOTE - there is no obvious ChipId to check; we check
 	 * some "known" bits after reset, but it's still just a guess */
@@ -1831,23 +1526,17 @@ struct dvb_frontend *lgdt3306a_attach(const struct lgdt3306a_config *config,
 		goto fail;
 #endif
 	}
-
 	state->current_frequency = -1;
 	state->current_modulation = -1;
-
 	lgdt3306a_sleep(state);
-
 	return &state->frontend;
-
 fail:
 	pr_warn("unable to detect LGDT3306A hardware\n");
 	kfree(state);
 	return NULL;
 }
 EXPORT_SYMBOL(lgdt3306a_attach);
-
 #ifdef DBG_DUMP
-
 static const short regtab[] = {
 	0x0000, /* SOFTRSTB 1'b1 1'b1 1'b1 ADCPDB 1'b1 PLLPDB GBBPDB 11111111 */
 	0x0001, /* 1'b1 1'b1 1'b0 1'b0 AUTORPTRS */
@@ -2075,28 +1764,22 @@ static const short regtab[] = {
 	0x30a9, /* VDLOCK_Q FRAMELOCK */
 	0x30aa, /* MPEGLOCK */
 };
-
-#define numDumpRegs  (sizeof(regtab)/sizeof(regtab[0]))
+#define numDumpRegs (sizeof(regtab)/sizeof(regtab[0]))
 static u8 regval1[numDumpRegs] = {0, };
 static u8 regval2[numDumpRegs] = {0, };
-
 static void lgdt3306a_DumpAllRegs(struct lgdt3306a_state *state)
 {
 		memset(regval2, 0xff, sizeof(regval2));
 		lgdt3306a_DumpRegs(state);
 }
-
 static void lgdt3306a_DumpRegs(struct lgdt3306a_state *state)
 {
 	int i;
 	int sav_debug = debug;
-
 	if ((debug & DBG_DUMP) == 0)
 		return;
 	debug &= ~DBG_REG; /* suppress DBG_REG during reg dump */
-
 	lg_debug("\n");
-
 	for (i = 0; i < numDumpRegs; i++) {
 		lgdt3306a_read_reg(state, regtab[i], &regval1[i]);
 		if (regval1[i] != regval2[i]) {
@@ -2107,9 +1790,132 @@ static void lgdt3306a_DumpRegs(struct lgdt3306a_state *state)
 	debug = sav_debug;
 }
 #endif /* DBG_DUMP */
-
-
-
+/*
+ * I2C gate logic
+ * We must use unlocked I2C I/O because I2C adapter lock is already taken
+ * by the caller (usually tuner driver).
+ */
+static int lgdt3306a_select(struct i2c_adapter *adap, void *mux_priv, u32 chan)
+{
+	struct lgdt3306a_state *state = mux_priv;
+	struct i2c_client *client = state->client;
+	int ret;
+	u8 val;
+	u8 buf[3];
+	struct i2c_msg read_msg_1 = {
+		.addr = client->addr,
+		.flags = 0,
+		.buf = "\x00\x02",
+		.len = 2,
+	};
+	struct i2c_msg read_msg_2 = {
+		.addr = client->addr,
+		.flags = I2C_M_RD,
+		.buf = &val,
+		.len = 1,
+	};
+	struct i2c_msg write_msg = {
+		.addr = client->addr,
+		.flags = 0,
+		.buf = buf,
+		.len = 3,
+	};
+	ret = __i2c_transfer(client->adapter, &read_msg_1, 1);
+	if (ret != 1) {
+		pr_err("error (addr %02x reg 0x002 error (ret == %i)\n",
+		       client->addr, ret);
+		if (ret < 0)
+			return ret;
+		else
+			return -EREMOTEIO;
+	}
+	ret = __i2c_transfer(client->adapter, &read_msg_2, 1);
+	if (ret != 1) {
+		pr_err("error (addr %02x reg 0x002 error (ret == %i)\n",
+		       client->addr, ret);
+		if (ret < 0)
+			return ret;
+		else
+			return -EREMOTEIO;
+	}
+	buf[0] = 0x00;
+	buf[1] = 0x02;
+	val &= 0x7F;
+	val |= LG3306_TUNERI2C_ON;
+	buf[2] = val;
+	ret = __i2c_transfer(client->adapter, &write_msg, 1);
+	if (ret != 1) {
+		pr_err("error (addr %02x %02x <- %02x, err = %i)\n",
+		       write_msg.buf[0], write_msg.buf[1], write_msg.buf[2],
+		       ret);
+		if (ret < 0)
+			return ret;
+		else
+			return -EREMOTEIO;
+	}
+	return 0;
+}
+static int lgdt3306a_deselect(struct i2c_adapter *adap, void *mux_priv,
+			      u32 chan)
+{
+	struct lgdt3306a_state *state = mux_priv;
+	struct i2c_client *client = state->client;
+	int ret;
+	u8 val;
+	u8 buf[3];
+	struct i2c_msg read_msg_1 = {
+		.addr = client->addr,
+		.flags = 0,
+		.buf = "\x00\x02",
+		.len = 2,
+	};
+	struct i2c_msg read_msg_2 = {
+		.addr = client->addr,
+		.flags = I2C_M_RD,
+		.buf = &val,
+		.len = 1,
+	};
+	struct i2c_msg write_msg = {
+		.addr = client->addr,
+		.flags = 0,
+		.len = 3,
+		.buf = buf,
+	};
+	ret = __i2c_transfer(client->adapter, &read_msg_1, 1);
+	if (ret != 1) {
+		pr_err("error (addr %02x reg 0x002 error (ret == %i)\n",
+		       client->addr, ret);
+		if (ret < 0)
+			return ret;
+		else
+			return -EREMOTEIO;
+	}
+	ret = __i2c_transfer(client->adapter, &read_msg_2, 1);
+	if (ret != 1) {
+		pr_err("error (addr %02x reg 0x002 error (ret == %i)\n",
+		       client->addr, ret);
+		if (ret < 0)
+			return ret;
+		else
+			return -EREMOTEIO;
+	}
+	buf[0] = 0x00;
+	buf[1] = 0x02;
+	val &= 0x7F;
+	val |= LG3306_TUNERI2C_OFF;
+	buf[2] = val;
+	ret = __i2c_transfer(client->adapter, &write_msg, 1);
+	if (ret != 1) {
+		pr_err("error (addr %02x %02x <- %02x, err = %i)\n",
+		       write_msg.buf[0], write_msg.buf[1], write_msg.buf[2],
+		       ret);
+		if (ret < 0)
+			return ret;
+		else
+			return -EREMOTEIO;
+	}
+	return 0;
+}
 static struct dvb_frontend_ops lgdt3306a_ops = {
 	.delsys = { SYS_ATSC, SYS_DVBC_ANNEX_B },
 	.info = {
@@ -2137,7 +1943,115 @@ static struct dvb_frontend_ops lgdt3306a_ops = {
 	.ts_bus_ctrl          = lgdt3306a_ts_bus_ctrl,
 	.search               = lgdt3306a_search,
 };
-
+static int lgdt3306a_probe(struct i2c_client *client,
+		const struct i2c_device_id *id)
+{
+	struct lgdt3306a_config *config = client->dev.platform_data;
+	struct lgdt3306a_state *state;
+	u8 val;
+	int ret;
+	dev_dbg(&client->dev, "\n");
+	state = kzalloc(sizeof(*state), GFP_KERNEL);
+	if (!state) {
+		ret = -ENOMEM;
+		dev_err(&client->dev, "kzalloc() failed\n");
+		goto err;
+	}
+	state->client = client;
+	state->config.i2c_addr = config->i2c_addr;
+	state->config.qam_if_khz = config->qam_if_khz;
+	state->config.vsb_if_khz = config->vsb_if_khz;
+	state->config.deny_i2c_rptr = config->deny_i2c_rptr;
+	state->config.spectral_inversion = config->spectral_inversion;
+	state->config.mpeg_mode = config->mpeg_mode;
+	state->config.tpclk_edge = config->tpclk_edge;
+	state->config.tpvalid_polarity = config->tpvalid_polarity;
+	state->config.xtalMHz = config->xtalMHz;
+	state->config.has_tuner_i2c_adapter = config->has_tuner_i2c_adapter;
+	state->cfg = &state->config;
+	/* create mux i2c adapter for tuner */
+	state->i2c_adap = i2c_add_mux_adapter(client->adapter, &client->dev,
+			state, 0, 0, 0, lgdt3306a_select, lgdt3306a_deselect);
+	if (state->i2c_adap == NULL) {
+		ret = -ENODEV;
+		goto err_kfree;
+	}
+	/* create dvb_frontend */
+	memcpy(&state->frontend.ops, &lgdt3306a_ops,
+	       sizeof(state->frontend.ops));
+	state->frontend.demodulator_priv = state;
+	*config->i2c_adapter = state->i2c_adap;
+	*config->fe = &state->frontend;
+	/* verify that we're talking to a lg3306a */
+	/* FGR - NOTE - there is no obvious ChipId to check; we check
+	 * some "known" bits after reset, but it's still just a guess */
+	ret = lgdt3306a_read_reg(state, 0x0000, &val);
+	if (lg_chkerr(ret))
+		goto err_kfree;
+	if ((val & 0x74) != 0x74) {
+		pr_warn("expected 0x74, got 0x%x\n", (val & 0x74));
+#if 0
+		/* FIXME - re-enable when we know this is right */
+		goto err_kfree;
+#endif
+	}
+	ret = lgdt3306a_read_reg(state, 0x0001, &val);
+	if (lg_chkerr(ret))
+		goto err_kfree;
+	if ((val & 0xf6) != 0xc6) {
+		pr_warn("expected 0xc6, got 0x%x\n", (val & 0xf6));
+#if 0
+		/* FIXME - re-enable when we know this is right */
+		goto err_kfree;
+#endif
+	}
+	ret = lgdt3306a_read_reg(state, 0x0002, &val);
+	if (lg_chkerr(ret))
+		goto err_kfree;
+	if ((val & 0x73) != 0x03) {
+		pr_warn("expected 0x03, got 0x%x\n", (val & 0x73));
+#if 0
+		/* FIXME - re-enable when we know this is right */
+		goto err_kfree;
+#endif
+	}
+	state->current_frequency = -1;
+	state->current_modulation = -1;
+	lgdt3306a_sleep(state);
+	i2c_set_clientdata(client, state);
+	dev_info(&client->dev, "LG Electronics LGDT3306A successfully attached\n");
+	return 0;
+err_kfree:
+	kfree(state);
+err:
+	dev_dbg(&client->dev, "failed=%d\n", ret);
+	return ret;
+}
+static int lgdt3306a_remove(struct i2c_client *client)
+{
+	struct lgdt3306a_state *state = i2c_get_clientdata(client);
+	dev_dbg(&client->dev, "\n");
+	i2c_del_mux_adapter(state->i2c_adap);
+	state->frontend.ops.release = NULL;
+	state->frontend.demodulator_priv = NULL;
+	kfree(state);
+	return 0;
+}
+static const struct i2c_device_id lgdt3306a_id_table[] = {
+	{"lgdt3306a", 0},
+	{}
+};
+MODULE_DEVICE_TABLE(i2c, lgdt3306a_id_table);
+static struct i2c_driver lgdt3306a_driver = {
+	.driver = {
+		.owner	= THIS_MODULE,
+		.name	= "lgdt3306a",
+	},
+	.probe		= lgdt3306a_probe,
+	.remove		= lgdt3306a_remove,
+	.id_table	= lgdt3306a_id_table,
+};
+module_i2c_driver(lgdt3306a_driver);
 MODULE_DESCRIPTION("LG Electronics LGDT3306A ATSC/QAM-B Demodulator Driver");
 MODULE_AUTHOR("Fred Richter <frichter@hauppauge.com>");
 MODULE_LICENSE("GPL");

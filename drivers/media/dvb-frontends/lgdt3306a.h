@@ -14,50 +14,51 @@
  *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *    GNU General Public License for more details.
  */
-
 #ifndef _LGDT3306A_H_
 #define _LGDT3306A_H_
-
 #include <linux/i2c.h>
+#include <linux/i2c-mux.h>
 #include "dvb_frontend.h"
-
-
+#define LG3306_TUNERI2C_ON  0x00
+#define LG3306_TUNERI2C_OFF 0x80
 enum lgdt3306a_mpeg_mode {
 	LGDT3306A_MPEG_PARALLEL = 0,
 	LGDT3306A_MPEG_SERIAL = 1,
 };
-
 enum lgdt3306a_tp_clock_edge {
 	LGDT3306A_TPCLK_RISING_EDGE = 0,
 	LGDT3306A_TPCLK_FALLING_EDGE = 1,
 };
-
 enum lgdt3306a_tp_valid_polarity {
 	LGDT3306A_TP_VALID_LOW = 0,
 	LGDT3306A_TP_VALID_HIGH = 1,
 };
-
 struct lgdt3306a_config {
 	u8 i2c_addr;
-
+	/*
+	 * frontend
+	 * returned by driver
+	 */
+	struct dvb_frontend **fe;
+	/*
+	 * tuner I2C adapter
+	 * returned by driver
+	 */
+	struct i2c_adapter **i2c_adapter;
 	/* user defined IF frequency in KHz */
 	u16 qam_if_khz;
 	u16 vsb_if_khz;
-
 	/* disable i2c repeater - 0:repeater enabled 1:repeater disabled */
-	int deny_i2c_rptr:1;
-
+	unsigned int deny_i2c_rptr:1;
 	/* spectral inversion - 0:disabled 1:enabled */
-	int spectral_inversion:1;
-
+	unsigned int spectral_inversion:1;
 	enum lgdt3306a_mpeg_mode mpeg_mode;
 	enum lgdt3306a_tp_clock_edge tpclk_edge;
 	enum lgdt3306a_tp_valid_polarity tpvalid_polarity;
-
 	/* demod clock freq in MHz; 24 or 25 supported */
 	int  xtalMHz;
+	int has_tuner_i2c_adapter;
 };
-
 #if IS_ENABLED(CONFIG_DVB_LGDT3306A)
 struct dvb_frontend *lgdt3306a_attach(const struct lgdt3306a_config *config,
 				      struct i2c_adapter *i2c_adap);
@@ -70,5 +71,4 @@ struct dvb_frontend *lgdt3306a_attach(const struct lgdt3306a_config *config,
 	return NULL;
 }
 #endif /* CONFIG_DVB_LGDT3306A */
-
 #endif /* _LGDT3306A_H_ */
