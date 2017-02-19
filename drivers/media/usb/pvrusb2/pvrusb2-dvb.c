@@ -248,6 +248,13 @@ static int pvr2_dvb_stop_feed(struct dvb_demux_feed *dvbdmxfeed)
 static int pvr2_dvb_bus_ctrl(struct dvb_frontend *fe, int acquire)
 {
 	struct pvr2_dvb_adapter *adap = fe->dvb->priv;
+	const struct pvr2_hdw *hdw = adap->channel.hdw;
+
+	pvr2_trace(PVR2_TRACE_DVB_FEED, "%s(): dvb bus ctrl: %d", __func__, acquire);
+
+	if (hdw->fe_ts_bus_ctrl)
+		hdw->fe_ts_bus_ctrl(fe, acquire);
+
 	return pvr2_channel_limit_inputs(
 	    &adap->channel,
 	    (acquire ? (1 << PVR2_CVAL_INPUT_DTV) : 0));
@@ -365,8 +372,10 @@ static int pvr2_dvb_frontend_init(struct pvr2_dvb_adapter *adap)
 			adap->fe->ops.analog_ops.standby(adap->fe);
 
 		/* Ensure all frontends negotiate bus access */
+		/* save the original function pointer */
+		hdw->fe_ts_bus_ctrl = adap->fe->ops.ts_bus_ctrl;
+		pvr2_trace(PVR2_TRACE_INFO, "transferring ts_bus_ctrl() to pvr2_dvb_bus_ctrl()");
 		adap->fe->ops.ts_bus_ctrl = pvr2_dvb_bus_ctrl;
-
 	} else {
 		pvr2_trace(PVR2_TRACE_ERROR_LEGS,
 			   "no frontend was attached!");

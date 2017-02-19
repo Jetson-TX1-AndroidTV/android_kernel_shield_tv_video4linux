@@ -32,7 +32,11 @@
 #include "tda18271.h"
 #include "s5h1411.h"
 #include "lgdt3305.h"
+#include "lgdt3306a.h"
 #include "mb86a20s.h"
+#include "si2168b.h"
+#include "silg.h"
+#include "silabs_tercab.h"
 
 MODULE_DESCRIPTION("driver for cx231xx based DVB cards");
 MODULE_AUTHOR("Srinivasa Deevi <srinivasa.deevi@conexant.com>");
@@ -67,6 +71,9 @@ struct cx231xx_dvb {
 	struct dmx_frontend fe_hw;
 	struct dmx_frontend fe_mem;
 	struct dvb_net net;
+
+	struct i2c_client	*i2c_client_demod;
+	struct i2c_client	*i2c_client_tuner;
 };
 
 static struct s5h1432_config dvico_s5h1432_config = {
@@ -128,6 +135,38 @@ static struct lgdt3305_config hcw_lgdt3305_config = {
 	.vsb_if_khz         = 3250,
 };
 
+static struct lgdt3306a_config hcw_lgdt3306a_config = {
+	/* LG3306A demodulator configuration */
+	.i2c_addr           = 0xB2 >> 1,
+
+	/* user defined IF frequency in KHz */
+	.qam_if_khz         = HVR19x5_QAM_IF, //needs to match tuner
+	.vsb_if_khz         = HVR19x5_VSB_IF, //needs to match tuner
+
+	/* disable i2c repeater - 0:repeater enabled 1:repeater disabled */
+	.deny_i2c_rptr      = 1,
+
+	/* spectral inversion - 0:disabled 1:enabled */
+	.spectral_inversion = 1,
+
+	.mpeg_mode          = LGDT3306A_MPEG_SERIAL,
+	.tpclk_edge         = LGDT3306A_TPCLK_RISING_EDGE,
+	.tpvalid_polarity   = LGDT3306A_TP_VALID_HIGH,
+
+	.xtalMHz            = 25, //demod clock freq in MHz; 24 or 25 supported
+};
+
+static struct silabs_tercab_config hauppauge_si2157_config = {
+	.tuner_address           = 0xC0 >> 1,      /* address of the tuner for ATSC/DVB-T */
+	.qam_if_khz              = HVR19x5_QAM_IF, /* needs to match demods qam if */
+	.vsb_if_khz              = HVR19x5_VSB_IF, /* needs to match demods vsb if */
+	.tuner_clock_control     = 1, /* 0:always off 1:always on 2:clock managed */
+	.tuner_agc_control       = 1,
+	.fef_mode                = 0, /* fef mode slow normal agc */
+	.crystal_trim_xo_cap     = 2,
+	.indirect_i2c_connection = 1, /* Si2157 connected directly */
+};
+
 static struct tda18271_std_map hauppauge_tda18271_std_map = {
 	.atsc_6   = { .if_freq = 3250, .agc_mode = 3, .std = 4,
 		      .if_lvl = 1, .rfagc_top = 0x58, },
@@ -149,6 +188,50 @@ static struct tda18271_config pv_tda18271_config = {
 	.std_map = &mb86a20s_tda18271_config,
 	.gate    = TDA18271_GATE_DIGITAL,
 	.small_i2c = TDA18271_03_BYTE_CHUNK_INIT,
+};
+
+static const struct si2168b_config si2168b_config = {
+	.demod_address           = 0xC8 >> 1,
+	.min_delay_ms            = 85,
+	.ts_bus_mode             = 1, /*1-serial, 2-parallel.*/
+	.ts_clock_mode           = 1, /*0-auto_fixed, 1-auto_adapt, 2-manual.*/
+	.clk_gapped_en           = 1, /*0-disabled, 1-enabled.*/
+	.ts_par_clk_invert       = 1, /*0-not-invert, 1-invert*/
+	.ts_par_clk_shift        = 0,
+	.fef_mode                = 0, /* needs to match tuner */
+	.fef_pin                 = 3,
+	.fef_level               = 0,
+	.indirect_i2c_connection = 1, /*Si2177 connected directly*/
+	.start_ctrl              = NULL,
+};
+
+static struct silg_config pvr2_hvr1975_silg_config = {
+	/* Si2168B demodulator configuration */
+	.si_demod_enable         = !0,
+	.si_i2c_addr             = 0xC8 >> 1,
+	.min_delay_ms            = 85,
+	.ts_bus_mode             = 1, /*1-serial, 2-parallel.*/
+	.ts_clock_mode           = 1, /*0-auto_fixed, 1-auto_adapt, 2-manual.*/
+	.clk_gapped_en           = 1, /*0-disabled, 1-enabled.*/
+	.ts_par_clk_invert       = 1, /*0-not-invert, 1-invert*/
+	.ts_par_clk_shift        = 0,
+	.fef_mode                = 0, /* needs to match tuner */
+	.fef_pin                 = 3,
+	.fef_level               = 0,
+	.indirect_i2c_connection = 1, /*Si2177 connected directly*/
+	.start_ctrl              = NULL,
+
+	/* LG3306A demodulator configuration */
+	.lg_demod_enable         = !0,
+	.lg_i2c_addr             = 0xB2 >> 1,
+	.mpeg_mode               = LGDT3306A_MPEG_SERIAL,
+	.tpclk_edge              = LGDT3306A_TPCLK_RISING_EDGE,
+	.tpvalid_polarity        = LGDT3306A_TP_VALID_HIGH,
+	.deny_i2c_rptr           = 1,
+	.spectral_inversion      = 1,
+	.qam_if_khz              = HVR19x5_QAM_IF, /* needs to match tuner */
+	.vsb_if_khz              = HVR19x5_VSB_IF, /* needs to match tuner */
+	.xtalMHz                 = 25,
 };
 
 static inline void print_err_status(struct cx231xx *dev, int packet, int status)
@@ -702,7 +785,79 @@ static int dvb_init(struct cx231xx *dev)
 			   0x60, &dev->i2c_bus[dev->board.tuner_i2c_master].i2c_adap,
 			   &hcw_tda18271_config);
 		break;
+	case CX231XX_BOARD_HAUPPAUGE_EXETER_955Q:
 
+		printk(KERN_INFO "%s: looking for tuner / demod on i2c bus: %d\n",
+		       __func__, i2c_adapter_id(&dev->i2c_bus[dev->board.tuner_i2c_master].i2c_adap));
+
+		dev->dvb->frontend = dvb_attach(lgdt3306a_attach,
+						&hcw_lgdt3306a_config,
+						&dev->i2c_bus[dev->board.tuner_i2c_master].i2c_adap);
+
+		if (dev->dvb->frontend == NULL) {
+			printk(DRIVER_NAME
+			       ": Failed to attach LG3306A front end\n");
+			result = -EINVAL;
+			goto out_free;
+		}
+
+		/* define general-purpose callback pointer */
+		dvb->frontend->callback = cx231xx_tuner_callback;
+
+		dvb_attach(silabs_tercab_attach, dev->dvb->frontend,
+			   &dev->i2c_bus[dev->board.tuner_i2c_master].i2c_adap,
+			   &hauppauge_si2157_config);
+		break;
+	case CX231XX_BOARD_HAUPPAUGE_935C:
+
+		printk(KERN_INFO "%s: looking for tuner / demod on i2c bus: %d\n",
+		       __func__, i2c_adapter_id(&dev->i2c_bus[dev->board.tuner_i2c_master].i2c_adap));
+
+		dev->dvb->frontend = dvb_attach(si2168b_attach,
+			&si2168b_config,
+			&dev->i2c_bus[dev->board.tuner_i2c_master].i2c_adap);
+
+		if (dev->dvb->frontend == NULL) {
+			printk(DRIVER_NAME
+			       ": Failed to attach Si2168B front end\n");
+			result = -EINVAL;
+			goto out_free;
+		}
+
+		dev->dvb->frontend->ops.i2c_gate_ctrl = NULL;
+
+		/* define general-purpose callback pointer */
+		dvb->frontend->callback = cx231xx_tuner_callback;
+
+		dvb_attach(silabs_tercab_attach, dev->dvb->frontend,
+			&dev->i2c_bus[dev->board.tuner_i2c_master].i2c_adap,
+			&hauppauge_si2157_config);
+		break;
+	case CX231XX_BOARD_HAUPPAUGE_975:
+
+		printk(KERN_INFO "%s: looking for tuner / demod on i2c bus: %d\n",
+		       __func__, i2c_adapter_id(&dev->i2c_bus[dev->board.tuner_i2c_master].i2c_adap));
+
+		dev->dvb->frontend = dvb_attach(silg_attach,
+			&pvr2_hvr1975_silg_config,
+			&dev->i2c_bus[dev->board.tuner_i2c_master].i2c_adap);
+
+		if (dev->dvb->frontend == NULL) {
+			printk(DRIVER_NAME
+			       ": Failed to attach SILG front end\n");
+			result = -EINVAL;
+			goto out_free;
+		}
+
+		dev->dvb->frontend->ops.i2c_gate_ctrl = NULL;
+
+		/* define general-purpose callback pointer */
+		dvb->frontend->callback = cx231xx_tuner_callback;
+
+		dvb_attach(silabs_tercab_attach, dev->dvb->frontend,
+			&dev->i2c_bus[dev->board.tuner_i2c_master].i2c_adap,
+			&hauppauge_si2157_config);
+		break;
 	case CX231XX_BOARD_PV_PLAYTV_USB_HYBRID:
 	case CX231XX_BOARD_KWORLD_UB430_USB_HYBRID:
 
@@ -762,12 +917,20 @@ out_free:
 
 static int dvb_fini(struct cx231xx *dev)
 {
+	struct i2c_client *client;
+
 	if (!dev->board.has_dvb) {
 		/* This device does not support the extension */
 		return 0;
 	}
 
 	if (dev->dvb) {
+		client = dev->dvb->i2c_client_tuner;
+		/* remove I2C tuner */
+		if (client) {
+			module_put(client->dev.driver->owner);
+			i2c_unregister_device(client);
+		}
 		unregister_dvb(dev->dvb);
 		dev->dvb = NULL;
 	}

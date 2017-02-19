@@ -30,6 +30,9 @@
 #define SAA7164_REV3_FIRMWARE		"NXP7164-2010-03-10.1.fw"
 #define SAA7164_REV3_FIRMWARE_SIZE	4019072
 
+#define SAA7164_HVR2255_FIRMWARE		"NXP7164-2010-04-01.1.fw"
+#define SAA7164_HVR2255_FIRMWARE_SIZE	3283792
+
 struct fw_header {
 	u32	firmwaresize;
 	u32	bslsize;
@@ -218,8 +221,15 @@ int saa7164_downloadfirmware(struct saa7164_dev *dev)
 		fwname = SAA7164_REV2_FIRMWARE;
 		fwlength = SAA7164_REV2_FIRMWARE_SIZE;
 	} else {
-		fwname = SAA7164_REV3_FIRMWARE;
-		fwlength = SAA7164_REV3_FIRMWARE_SIZE;
+		if (dev->board == SAA7164_BOARD_HAUPPAUGE_HVR2255
+				|| dev->board == SAA7164_BOARD_HAUPPAUGE_HVR2205
+				|| dev->board == SAA7164_BOARD_HAUPPAUGE_HVR2215) {
+			fwname = SAA7164_HVR2255_FIRMWARE;
+			fwlength = SAA7164_HVR2255_FIRMWARE_SIZE;
+		} else {
+			fwname = SAA7164_REV3_FIRMWARE;
+			fwlength = SAA7164_REV3_FIRMWARE_SIZE;
+		}
 	}
 
 	version = saa7164_getcurrentfirmwareversion(dev);

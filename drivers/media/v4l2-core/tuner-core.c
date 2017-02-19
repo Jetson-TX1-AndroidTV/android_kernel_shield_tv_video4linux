@@ -40,6 +40,7 @@
 #include "xc5000.h"
 #include "tda18271.h"
 #include "xc4000.h"
+#include "silabs_tercab.h"
 
 #define UNSET (-1U)
 
@@ -408,6 +409,30 @@ static void set_type(struct i2c_client *c, unsigned int type,
 		tune_now = 0;
 		break;
 	}
+	case TUNER_SILABS_TERCAB:
+	{
+		static struct silabs_tercab_config silabs_config = {
+			.tuner_address           = 0xC0 >> 1,      /* address of the tuner for ATSC/DVB-T */
+			.qam_if_khz              = HVR19x5_QAM_IF, /* needs to match demods qam if */
+			.vsb_if_khz              = HVR19x5_VSB_IF, /* needs to match demods vsb if */
+			.tuner_clock_control     = 1, /* 0:always off 1:always on 2:clock managed */
+			.tuner_agc_control       = 1,
+			.fef_mode                = 0, /* fef mode slow normal agc */
+			.crystal_trim_xo_cap     = 8,
+			.indirect_i2c_connection = 1, /* tuner connected directly(?) */
+		};
+
+		printk(KERN_INFO "%s: looking for Silicon Labs tuner on i2c bus: %d\n",
+		       __func__, i2c_adapter_id(t->i2c->adapter));
+
+		if (!dvb_attach(silabs_tercab_attach, &t->fe, t->i2c->adapter, &silabs_config)) {
+			printk(KERN_ERR "%s: attaching Silicon Labs tuner failed\n", __func__);
+			goto attach_failed;
+		}
+		printk(KERN_INFO "%s: Silicon Labs tuner attached\n", __func__);
+		tune_now = 0;
+		break;
+	}
 	default:
 		if (!dvb_attach(simple_tuner_attach, &t->fe,
 				t->i2c->adapter, t->i2c->addr, t->type))
@@ -651,17 +676,27 @@ static int tuner_probe(struct i2c_client *client,
 			}
 			break;
 		case 0x60:
-			if (tuner_symbol_probe(tea5767_autodetection,
+			if (tuner_symbol_probe(silabs_tercab_autodetection,
 					       t->i2c->adapter, t->i2c->addr)
-					>= 0) {
-				t->type = TUNER_TEA5767;
-				t->mode_mask = T_RADIO;
-				/* Sets freq to FM range */
-				tuner_lookup(t->i2c->adapter, &radio, &tv);
-				if (tv)
-					tv->mode_mask &= ~T_RADIO;
-
+					== 0) {
+				tuner_dbg("Silicon Labs tuner @ 0x%02X detected\n", t->i2c->addr);
+				t->type = TUNER_SILABS_TERCAB;
+				t->mode_mask = T_ANALOG_TV;
 				goto register_client;
+			} else {
+				tuner_dbg("i2c addr 0x60: tea5767_autodetection\n");
+				if (tuner_symbol_probe(tea5767_autodetection,
+					       	   t->i2c->adapter, t->i2c->addr)
+						>= 0) {
+					t->type = TUNER_TEA5767;
+					t->mode_mask = T_RADIO;
+					/* Sets freq to FM range */
+					tuner_lookup(t->i2c->adapter, &radio, &tv);
+					if (tv)
+						tv->mode_mask &= ~T_RADIO;
+
+					goto register_client;
+				}
 			}
 			break;
 		}

@@ -564,12 +564,43 @@ int saa7164_api_set_audio_std(struct saa7164_port *port)
 		printk(KERN_ERR "%s() error, ret = 0x%x\n", __func__, ret);
 
 	/* Manually select the appropriate TV audio standard */
-	if (port->encodernorm.id & V4L2_STD_NTSC) {
+	if ((port->encodernorm.id & V4L2_STD_NTSC_M) == port->encodernorm.id) {
+		dprintk(DBGLVL_API, " NTSC-M Audio\n");
 		tvaudio.std = TU_STANDARD_NTSC_M;
 		tvaudio.country = 1;
-	} else {
+	} else if ((port->encodernorm.id & V4L2_STD_NTSC_M_JP) == port->encodernorm.id) {
+		dprintk(DBGLVL_API, " NTSC-M-JP Audio\n");
+		tvaudio.std = TU_STANDARD_NTSC_M_J;
+		tvaudio.country = 81;
+	} else if ((port->encodernorm.id & V4L2_STD_NTSC_443) == port->encodernorm.id) {
+		dprintk(DBGLVL_API, " NTSC-443 Audio\n");
+		tvaudio.std = TU_STANDARD_NTSC_433;
+		tvaudio.country = 1;
+	} else if ((port->encodernorm.id & V4L2_STD_PAL_BG) == port->encodernorm.id) {
+		dprintk(DBGLVL_API, " PAL-BG Audio\n");
+		tvaudio.std = TU_STANDARD_PAL_B;
+		tvaudio.country = 49;
+	} else if ((port->encodernorm.id & V4L2_STD_PAL_I) == port->encodernorm.id) {
+		dprintk(DBGLVL_API, " PAL-I Audio\n");
 		tvaudio.std = TU_STANDARD_PAL_I;
 		tvaudio.country = 44;
+	} else if ((port->encodernorm.id & V4L2_STD_PAL_DK) == port->encodernorm.id) {
+		dprintk(DBGLVL_API, " PAL-DK Audio\n");
+		tvaudio.std = TU_STANDARD_PAL_D;
+		tvaudio.country = 48;
+	} else if ((port->encodernorm.id & V4L2_STD_SECAM_L) == port->encodernorm.id) {
+		dprintk(DBGLVL_API, " SECAM-L\n");
+		tvaudio.std = TU_STANDARD_SECAM_L;
+		tvaudio.country = 33;
+	} else if ((port->encodernorm.id & V4L2_STD_SECAM_LC) == port->encodernorm.id) {
+		dprintk(DBGLVL_API, " SECAM-Lc Audio\n");
+		tvaudio.std = TU_STANDARD_SECAM_L1;
+		tvaudio.country = 33;
+	} else {
+		/* Unknown standard, set NTSC-M */
+		tvaudio.std = 1;
+		tvaudio.country = 1;
+		dprintk(DBGLVL_API, " Unknown (assuming NTSC-M Audio)\n");
 	}
 
 	ret = saa7164_cmd_send(port->dev, port->tunerunit.unitid, SET_CUR,
@@ -577,6 +608,7 @@ int saa7164_api_set_audio_std(struct saa7164_port *port)
 	if (ret != SAA_OK)
 		printk(KERN_ERR "%s() TU_STANDARD_CONTROL error, ret = 0x%x\n",
 			__func__, ret);
+
 	return ret;
 }
 
@@ -631,10 +663,14 @@ static int saa7164_api_set_dif(struct saa7164_port *port, u8 reg, u8 val)
 	dprintk(DBGLVL_API, "%s(nr=%d type=%d val=%x)\n", __func__,
 		port->nr, port->type, val);
 
-	if (port->nr == 0)
+	if (port->nr == SAA7164_PORT_ENC1) {
 		mas = 0xd0;
-	else
+	} else if (port->nr == SAA7164_PORT_ENC2) {
 		mas = 0xe0;
+	} else {
+		printk(KERN_ERR "%s() invalid port nr %d\n", __func__, port->nr);
+		return -EIO;
+	}
 
 	memset(buf, 0, sizeof(buf));
 
@@ -681,50 +717,44 @@ int saa7164_api_configure_dif(struct saa7164_port *port, u32 std)
 {
 	struct saa7164_dev *dev = port->dev;
 	int ret = 0;
-	u8 agc_disable;
+	u8 agc_disable = 0;
+	u8 video_standard = 0;
 
 	dprintk(DBGLVL_API, "%s(nr=%d, 0x%x)\n", __func__, port->nr, std);
 
-	if (std & V4L2_STD_NTSC) {
-		dprintk(DBGLVL_API, " NTSC\n");
-		saa7164_api_set_dif(port, 0x00, 0x01); /* Video Standard */
-		agc_disable = 0;
-	} else if (std & V4L2_STD_PAL_I) {
+	if ((std & V4L2_STD_NTSC_M) == std) {
+		dprintk(DBGLVL_API, " NTSC-M\n");
+		video_standard = 0x01;
+	} else if ((std & V4L2_STD_NTSC_M_JP) == std) {
+		dprintk(DBGLVL_API, " NTSC-M-JP\n");
+		video_standard = 0x01;
+	} else if ((std & V4L2_STD_NTSC_443) == std) {
+		dprintk(DBGLVL_API, " NTSC-443\n");
+		video_standard = 0x01;
+	} else if ((std & V4L2_STD_PAL_BG) == std) {
+		dprintk(DBGLVL_API, " PAL-BG\n");
+		video_standard = 0x02;
+	} else if ((std & V4L2_STD_PAL_I) == std) {
 		dprintk(DBGLVL_API, " PAL-I\n");
-		saa7164_api_set_dif(port, 0x00, 0x08); /* Video Standard */
-		agc_disable = 0;
-	} else if (std & V4L2_STD_PAL_M) {
-		dprintk(DBGLVL_API, " PAL-M\n");
-		saa7164_api_set_dif(port, 0x00, 0x01); /* Video Standard */
-		agc_disable = 0;
-	} else if (std & V4L2_STD_PAL_N) {
-		dprintk(DBGLVL_API, " PAL-N\n");
-		saa7164_api_set_dif(port, 0x00, 0x01); /* Video Standard */
-		agc_disable = 0;
-	} else if (std & V4L2_STD_PAL_Nc) {
-		dprintk(DBGLVL_API, " PAL-Nc\n");
-		saa7164_api_set_dif(port, 0x00, 0x01); /* Video Standard */
-		agc_disable = 0;
-	} else if (std & V4L2_STD_PAL_B) {
-		dprintk(DBGLVL_API, " PAL-B\n");
-		saa7164_api_set_dif(port, 0x00, 0x02); /* Video Standard */
-		agc_disable = 0;
-	} else if (std & V4L2_STD_PAL_DK) {
+		video_standard = 0x08;
+	} else if ((std & V4L2_STD_PAL_DK) == std) {
 		dprintk(DBGLVL_API, " PAL-DK\n");
-		saa7164_api_set_dif(port, 0x00, 0x10); /* Video Standard */
-		agc_disable = 0;
-	} else if (std & V4L2_STD_SECAM_L) {
+		video_standard = 0x10;
+	} else if ((std & V4L2_STD_SECAM_L) == std) {
 		dprintk(DBGLVL_API, " SECAM-L\n");
-		saa7164_api_set_dif(port, 0x00, 0x20); /* Video Standard */
-		agc_disable = 0;
+		video_standard = 0x20;
+	} else if ((std & V4L2_STD_SECAM_LC) == std) {
+		dprintk(DBGLVL_API, " SECAM-Lc\n");
+		video_standard = 0x40;
 	} else {
 		/* Unknown standard, assume DTV */
 		dprintk(DBGLVL_API, " Unknown (assuming DTV)\n");
 		/* Undefinded Video Standard */
-		saa7164_api_set_dif(port, 0x00, 0x80);
+		video_standard = 0x80;
 		agc_disable = 1;
 	}
 
+	saa7164_api_set_dif(port, 0x00, video_standard);
 	saa7164_api_set_dif(port, 0x48, 0xa0); /* AGC Functions 1 */
 	saa7164_api_set_dif(port, 0xc0, agc_disable); /* AGC Output Disable */
 	saa7164_api_set_dif(port, 0x7c, 0x04); /* CVBS EQ */

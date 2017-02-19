@@ -38,6 +38,7 @@
 MODULE_DESCRIPTION("Driver for NXP SAA7164 based TV cards");
 MODULE_AUTHOR("Steven Toth <stoth@kernellabs.com>");
 MODULE_LICENSE("GPL");
+MODULE_VERSION("2015-02-09");
 
 /*
  *  1 Basic

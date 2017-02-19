@@ -1433,6 +1433,16 @@ static struct tuner_params tuner_sony_btf_pg463z_params[] = {
 	},
 };
 
+/* ------------ TUNER_SILABS_TERCAB - Si2157 NTSC ------------ */
+
+static struct tuner_params tuner_silabs_tercab_params[] = {
+	{
+		.type   = TUNER_PARAM_TYPE_DIGITAL,
+		.ranges = tuner_fm1236_mk3_ntsc_ranges,
+		.count  = ARRAY_SIZE(tuner_fm1236_mk3_ntsc_ranges),
+	},
+};
+
 /* --------------------------------------------------------------------- */
 
 struct tunertype tuners[] = {
@@ -1940,6 +1950,11 @@ struct tunertype tuners[] = {
 		.name   = "Sony BTF-PB463Z NTSC-M",
 		.params = tuner_sony_btf_pg463z_params,
 		.count  = ARRAY_SIZE(tuner_sony_btf_pg463z_params),
+	},
+	[TUNER_SILABS_TERCAB] = {
+		.name   = "Silicon Labs terrestrial/cable multistandard",
+		.params = tuner_silabs_tercab_params,
+		.count  = ARRAY_SIZE(tuner_silabs_tercab_params),
 	},
 };
 EXPORT_SYMBOL(tuners);

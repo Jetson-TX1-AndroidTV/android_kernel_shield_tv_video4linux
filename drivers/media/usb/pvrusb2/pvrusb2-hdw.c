@@ -320,6 +320,8 @@ static const struct pvr2_fx2cmd_descdef pvr2_fx2cmd_desc[] = {
 	{FX2CMD_ONAIR_DTV_STREAMING_OFF, "onair dtv stream off"},
 	{FX2CMD_ONAIR_DTV_POWER_ON, "onair dtv power on"},
 	{FX2CMD_ONAIR_DTV_POWER_OFF, "onair dtv power off"},
+	{FX2CMD_HCW_DEMOD_RESET_PIN, "hcw demod reset pin"},
+	{FX2CMD_HCW_MAKO_SLEEP_PIN, "hcw mako sleep pin"},
 };
 
 
@@ -2117,6 +2119,7 @@ static void pvr2_hdw_setup_low(struct pvr2_hdw *hdw)
 	unsigned int idx;
 	struct pvr2_ctrl *cptr;
 	int reloadFl = 0;
+
 	if (hdw->hdw_desc->fx2_firmware.cnt) {
 		if (!reloadFl) {
 			reloadFl =
@@ -2168,6 +2171,23 @@ static void pvr2_hdw_setup_low(struct pvr2_hdw *hdw)
 	// This step MUST happen after the earlier powerup step.
 	pvr2_i2c_core_init(hdw);
 	if (!pvr2_hdw_dev_ok(hdw)) return;
+
+	/* reset demod only on Hauppauge 160xxx platform */
+	if (hdw->usb_dev->descriptor.idVendor == 0x2040 &&
+			(hdw->usb_dev->descriptor.idProduct == 0x7502 || hdw->usb_dev->descriptor.idProduct == 0x7510)) {
+		pr_info("%s(): resetting 160xxx demod\n", __func__);
+		//FGR - not sure this is the proper place to reset demods once only
+		pvr2_issue_simple_cmd(hdw,
+				     FX2CMD_HCW_DEMOD_RESET_PIN |
+				     (1 << 8) |
+				     ((0) << 16));
+		msleep(10);
+		pvr2_issue_simple_cmd(hdw,
+				     FX2CMD_HCW_DEMOD_RESET_PIN |
+				     (1 << 8) |
+				     ((1) << 16));
+		msleep(10);
+	}
 
 	pvr2_hdw_load_modules(hdw);
 	if (!pvr2_hdw_dev_ok(hdw)) return;
@@ -2233,7 +2253,6 @@ static void pvr2_hdw_setup_low(struct pvr2_hdw *hdw)
 			   "pvr2_hdw_setup: Tuner type overridden to %d",
 			   hdw->tuner_type);
 	}
-
 
 	if (!pvr2_hdw_dev_ok(hdw)) return;
 
@@ -4056,6 +4075,17 @@ int pvr2_hdw_cmd_decoder_reset(struct pvr2_hdw *hdw)
 static int pvr2_hdw_cmd_hcw_demod_reset(struct pvr2_hdw *hdw, int onoff)
 {
 	hdw->flag_ok = !0;
+
+	//BUGBUG - use this for 160xxx, but how can we tell it's the right HW
+	if (hdw->usb_dev->descriptor.idVendor == 0x2040 &&
+			(hdw->usb_dev->descriptor.idProduct == 0x7502 || hdw->usb_dev->descriptor.idProduct == 0x7510)) {
+		pr_info("%s(): resetting demod on Hauppauge 160xxx platform skipped\n", __func__);
+		//FGR don't want Demod reset on 160xxx or it will trash Demod tristate
+		return pvr2_issue_simple_cmd(hdw,
+				     FX2CMD_HCW_MAKO_SLEEP_PIN |
+				     (1 << 8) |
+				     ((onoff ? 1 : 0) << 16));
+	}
 	return pvr2_issue_simple_cmd(hdw,
 				     FX2CMD_HCW_DEMOD_RESETIN |
 				     (1 << 8) |

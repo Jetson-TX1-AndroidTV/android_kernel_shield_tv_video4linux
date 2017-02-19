@@ -35,14 +35,17 @@ pvr2_device_desc structures.
 #ifdef CONFIG_VIDEO_PVRUSB2_DVB
 #include "pvrusb2-hdw-internal.h"
 #include "lgdt330x.h"
+#include "lgdt3306a.h"
 #include "s5h1409.h"
 #include "s5h1411.h"
 #include "tda10048.h"
 #include "tda18271.h"
 #include "tda8290.h"
 #include "tuner-simple.h"
+#include "silabs_tercab.h"
+#include "si2168b.h"
+#include "silg.h"
 #endif
-
 
 /*------------------------------------------------------------------------*/
 /* Hauppauge PVR-USB2 Model 29xxx */
@@ -478,6 +481,143 @@ static const struct pvr2_dvb_props pvr2_751xx_dvb_props = {
 };
 #endif
 
+/*------------------------------------------------------------------------*/
+/* Hauppauge PVR-USB2 Models 160xxx */
+
+#ifdef CONFIG_VIDEO_PVRUSB2_DVB
+#define HVR19x5_QAM_IF 4000
+#define HVR19x5_VSB_IF 3250
+
+static struct silabs_tercab_config hauppauge_si2177_config = {
+	.tuner_address           = 0xC0 >> 1,      /* address of the tuner for ATSC/DVB-T */
+	.qam_if_khz              = HVR19x5_QAM_IF, /* needs to match demods qam if */
+	.vsb_if_khz              = HVR19x5_VSB_IF, /* needs to match demods vsb if */
+	.tuner_clock_control     = 2, /*0-always off 1-always on 2-clock managed */
+	.tuner_agc_control       = 1,
+	.fef_mode                = 0, /*0-slow normal AGC, 1-freeze pin, 2-slow initial AGC*/
+	.crystal_trim_xo_cap     = 8,
+	.indirect_i2c_connection = 1, /* Si2177 connected directly */
+};
+
+static int pvr2_si2177_attach(struct pvr2_dvb_adapter *adap)
+{
+	pr_info("%s()\n", __func__);
+
+	dvb_attach(silabs_tercab_attach, adap->fe,
+		   &adap->channel.hdw->i2c_adap,
+		   &hauppauge_si2177_config);
+
+	return 0;
+}
+
+/*------------------------------------------------------------------------*/
+/* Hauppauge PVR-USB2 Model 160000 */
+
+static struct silg_config pvr2_hvr1975_silg_config = {
+	/* Si2168B demodulator configuration */
+	.si_demod_enable         = !0,
+	.si_i2c_addr             = 0xC8 >> 1,
+	.min_delay_ms            = 85,
+	.ts_bus_mode             = 2, /*1-serial, 2-parallel.*/
+	.ts_clock_mode           = 2, /*0-auto_fixed, 1-auto_adapt, 2-manual.*/
+	.clk_gapped_en           = 1, /*0-disabled, 1-enabled.*/
+	.ts_par_clk_invert       = 0, /*0-not-invert, 1-invert*/
+	.ts_par_clk_shift        = 3, /*DVB-C QAM256 fix*/
+	.fef_mode                = 0, /* needs to match tuner */
+	.fef_pin                 = 3,
+	.fef_level               = 0,
+	.indirect_i2c_connection = 1, /*Si2177 connected directly*/
+	.start_ctrl              = NULL,
+
+	/* LG3306A demodulator configuration */
+	.lg_demod_enable         = !0,
+	.lg_i2c_addr             = 0xB2 >> 1,
+	.mpeg_mode               = LGDT3306A_MPEG_PARALLEL,
+	.tpclk_edge              = LGDT3306A_TPCLK_FALLING_EDGE,
+	.tpvalid_polarity        = LGDT3306A_TP_VALID_LOW,
+	.deny_i2c_rptr           = 1,
+	.spectral_inversion      = 1,
+	.qam_if_khz              = HVR19x5_QAM_IF, /* needs to match tuner */
+	.vsb_if_khz              = HVR19x5_VSB_IF, /* needs to match tuner */
+	.xtalMHz                 = 25,
+};
+
+static int pvr2_silg_attach(struct pvr2_dvb_adapter *adap)
+{
+	pr_info("%s()\n", __func__);
+
+	adap->fe = dvb_attach(silg_attach,
+				  &pvr2_hvr1975_silg_config,
+			      &adap->channel.hdw->i2c_adap);
+	if (adap->fe) {
+		pr_info("%s(): attached silg\n", __func__);
+		return 0;
+	}
+
+	return -EIO;
+}
+
+static const struct pvr2_dvb_props pvr2_160000_dvb_props = {
+	.frontend_attach = pvr2_silg_attach,
+	.tuner_attach    = pvr2_si2177_attach,
+};
+
+static const struct pvr2_device_client_desc pvr2_cli_160000[] = {
+	{ .module_id = PVR2_CLIENT_ID_CX25840 },
+	{ .module_id = PVR2_CLIENT_ID_TUNER,
+	  .i2c_address_list = "\x60" },
+	{ .module_id = PVR2_CLIENT_ID_DEMOD,
+	  .i2c_address_list = "\x59" },	//LG3306a addr
+};
+
+/*------------------------------------------------------------------------*/
+/* Hauppauge PVR-USB2 Model 160111 */
+
+static struct lgdt3306a_config pvr2_lgdt3306a_config = {
+	/* LG3306A demodulator configuration */
+	.i2c_addr           = 0xB2 >> 1,
+
+	/* user defined IF frequency in KHz */
+	.qam_if_khz         = HVR19x5_QAM_IF, //FGR - BUGBUG - needs to match tuner
+	.vsb_if_khz         = HVR19x5_VSB_IF, //FGR - BUGBUG - needs to match tuner
+
+	/* disable i2c repeater - 0:repeater enabled 1:repeater disabled */
+	.deny_i2c_rptr      = 1,
+
+	/* spectral inversion - 0:disabled 1:enabled */
+	.spectral_inversion = 1,
+
+	.mpeg_mode          = LGDT3306A_MPEG_PARALLEL,
+	.tpclk_edge         = LGDT3306A_TPCLK_FALLING_EDGE,
+	.tpvalid_polarity   = LGDT3306A_TP_VALID_LOW,
+
+	.xtalMHz            = 25, //demod clock freq in MHz; 24 or 25 supported
+};
+
+static int pvr2_lgdt3306a_attach(struct pvr2_dvb_adapter *adap)
+{
+	adap->fe = dvb_attach(lgdt3306a_attach, &pvr2_lgdt3306a_config,
+			      &adap->channel.hdw->i2c_adap);
+	if (adap->fe)
+		return 0;
+
+	return -EIO;
+}
+
+static const struct pvr2_dvb_props pvr2_160111_dvb_props = {
+	.frontend_attach = pvr2_lgdt3306a_attach,
+	.tuner_attach    = pvr2_si2177_attach,
+};
+
+static const struct pvr2_device_client_desc pvr2_cli_160111[] = {
+	{ .module_id = PVR2_CLIENT_ID_CX25840 },
+	{ .module_id = PVR2_CLIENT_ID_TUNER,
+	  .i2c_address_list = "\x60" },
+	{ .module_id = PVR2_CLIENT_ID_DEMOD,
+	  .i2c_address_list = "\x59" },	//LG3306a addr
+};
+#endif
+
 #define PVR2_FIRMWARE_75xxx "v4l-pvrusb2-73xxx-01.fw"
 static const char *pvr2_fw1_names_75xxx[] = {
 		PVR2_FIRMWARE_75xxx,
@@ -529,7 +669,58 @@ static const struct pvr2_device_desc pvr2_device_751xx = {
 #endif
 };
 
+#define PVR2_FIRMWARE_160xxx "v4l-pvrusb2-160xxx-01.fw"
+static const char *pvr2_fw1_names_160xxx[] = {
+		PVR2_FIRMWARE_160xxx,
+};
 
+static const struct pvr2_device_desc pvr2_device_160000 = {
+		.description = "WinTV HVR-1975 Model 160000",
+		.shortname = "160000",
+		.client_table.lst = pvr2_cli_160000,
+		.client_table.cnt = ARRAY_SIZE(pvr2_cli_160000),
+		.fx2_firmware.lst = pvr2_fw1_names_160xxx,
+		.fx2_firmware.cnt = ARRAY_SIZE(pvr2_fw1_names_160xxx),
+		.default_tuner_type = TUNER_SILABS_TERCAB,
+		.flag_has_cx25840 = !0,
+		.flag_has_hauppauge_rom = !0,
+		.flag_has_analogtuner = !0,
+		.flag_has_composite = !0,
+		.flag_has_svideo = !0,
+		.flag_fx2_16kb = !0,
+		.signal_routing_scheme = PVR2_ROUTING_SCHEME_HAUPPAUGE,
+		.digital_control_scheme = PVR2_DIGITAL_SCHEME_HAUPPAUGE,
+		.default_std_mask = V4L2_STD_NTSC_M,
+		.led_scheme = PVR2_LED_SCHEME_HAUPPAUGE,
+		.ir_scheme = PVR2_IR_SCHEME_ZILOG,
+#ifdef CONFIG_VIDEO_PVRUSB2_DVB
+		.dvb_props = &pvr2_160000_dvb_props,
+#endif
+};
+
+static const struct pvr2_device_desc pvr2_device_160111 = {
+		.description = "WinTV HVR-1955 Model 160111",
+		.shortname = "160111",
+		.client_table.lst = pvr2_cli_160111,
+		.client_table.cnt = ARRAY_SIZE(pvr2_cli_160111),
+		.fx2_firmware.lst = pvr2_fw1_names_160xxx,
+		.fx2_firmware.cnt = ARRAY_SIZE(pvr2_fw1_names_160xxx),
+		.default_tuner_type = TUNER_SILABS_TERCAB,
+		.flag_has_cx25840 = !0,
+		.flag_has_hauppauge_rom = !0,
+		.flag_has_analogtuner = !0,
+		.flag_has_composite = !0,
+		.flag_has_svideo = !0,
+		.flag_fx2_16kb = !0,
+		.signal_routing_scheme = PVR2_ROUTING_SCHEME_HAUPPAUGE,
+		.digital_control_scheme = PVR2_DIGITAL_SCHEME_HAUPPAUGE,
+		.default_std_mask = V4L2_STD_NTSC_M,
+		.led_scheme = PVR2_LED_SCHEME_HAUPPAUGE,
+		.ir_scheme = PVR2_IR_SCHEME_ZILOG,
+#ifdef CONFIG_VIDEO_PVRUSB2_DVB
+		.dvb_props = &pvr2_160111_dvb_props,
+#endif
+};
 
 /*------------------------------------------------------------------------*/
 
@@ -556,6 +747,10 @@ struct usb_device_id pvr2_device_table[] = {
 	  .driver_info = (kernel_ulong_t)&pvr2_device_751xx},
 	{ USB_DEVICE(0x0ccd, 0x0039),
 	  .driver_info = (kernel_ulong_t)&pvr2_device_av400},
+	{ USB_DEVICE(0x2040, 0x7502), /* HVR-1955 */
+	  .driver_info = (kernel_ulong_t)&pvr2_device_160111},
+	{ USB_DEVICE(0x2040, 0x7510), /* HVR-1975 */
+	  .driver_info = (kernel_ulong_t)&pvr2_device_160000},
 	{ }
 };
 
@@ -564,6 +759,7 @@ MODULE_FIRMWARE(PVR2_FIRMWARE_29xxx);
 MODULE_FIRMWARE(PVR2_FIRMWARE_24xxx);
 MODULE_FIRMWARE(PVR2_FIRMWARE_73xxx);
 MODULE_FIRMWARE(PVR2_FIRMWARE_75xxx);
+MODULE_FIRMWARE(PVR2_FIRMWARE_160xxx);
 
 /*
   Stuff for Emacs to see, in order to encourage consistent editing style:

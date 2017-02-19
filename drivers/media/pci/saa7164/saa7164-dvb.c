@@ -24,6 +24,9 @@
 #include "tda10048.h"
 #include "tda18271.h"
 #include "s5h1411.h"
+#include "lgdt3306a.h"
+#include "si2168b.h"
+#include "silabs_tercab.h"
 
 #define DRIVER_NAME "saa7164"
 
@@ -80,6 +83,95 @@ static struct s5h1411_config hauppauge_s5h1411_config = {
 	.inversion     = S5H1411_INVERSION_ON,
 	.status_mode   = S5H1411_DEMODLOCKING,
 	.mpeg_timing   = S5H1411_MPEGTIMING_CONTINOUS_NONINVERTING_CLOCK,
+};
+
+static struct lgdt3306a_config hauppauge_lgdt3306a_1_config = {
+	/* LG3306A demodulator configuration */
+	.i2c_addr           = 0xB2 >> 1,
+
+	/* user defined IF frequency in KHz */
+	.qam_if_khz         = HVR19x5_QAM_IF, /* needs to match tuner */
+	.vsb_if_khz         = HVR19x5_VSB_IF, /* needs to match tuner */
+
+	/* disable i2c repeater - 0:repeater enabled 1:repeater disabled */
+	.deny_i2c_rptr      = 1,
+
+	/* spectral inversion - 0:disabled 1:enabled */
+	.spectral_inversion = 1,
+
+	.mpeg_mode          = LGDT3306A_MPEG_SERIAL,
+	.tpclk_edge         = LGDT3306A_TPCLK_RISING_EDGE,
+	.tpvalid_polarity   = LGDT3306A_TP_VALID_HIGH,
+
+	.xtalMHz            = 25, /* demod clock freq in MHz; 24 or 25 supported */
+};
+
+static struct lgdt3306a_config hauppauge_lgdt3306a_2_config = {
+	/* LG3306A demodulator configuration */
+	.i2c_addr           = 0x1C >> 1,
+
+	/* user defined IF frequency in KHz */
+	.qam_if_khz         = HVR19x5_QAM_IF, /* needs to match tuner */
+	.vsb_if_khz         = HVR19x5_VSB_IF, /* needs to match tuner */
+
+	/* disable i2c repeater - 0:repeater enabled 1:repeater disabled */
+	.deny_i2c_rptr      = 1,
+
+	/* spectral inversion - 0:disabled 1:enabled */
+	.spectral_inversion = 1,
+
+	.mpeg_mode          = LGDT3306A_MPEG_SERIAL,
+	.tpclk_edge         = LGDT3306A_TPCLK_RISING_EDGE,
+	.tpvalid_polarity   = LGDT3306A_TP_VALID_HIGH,
+
+	.xtalMHz            = 25, /* demod clock freq in MHz; 24 or 25 supported */
+};
+
+static struct si2168b_config hauppauge_si2168b_1_config = {
+	/* the demodulator's i2c address */
+	.demod_address = 0xC8 >> 1,
+
+	/* minimum delay before retuning */
+	.min_delay_ms = 85,
+	.ts_bus_mode = 1, /*1-serial, 2-parallel.*/
+	.ts_clock_mode = 1, /*0-auto_fixed, 1-auto_adapt, 2-manual.*/
+	.clk_gapped_en = 1, /*0-disabled, 1-enabled.*/
+	.ts_par_clk_invert = 1, /*0-not-invert, 1-invert*/
+	.ts_par_clk_shift = 1, /*DVB-C QAM256 fix*/
+	.fef_mode = 1, /* needs to match tuner */
+	.fef_pin = 3,
+	.fef_level = 0,
+	.indirect_i2c_connection = 1, /*Si2157 connected directly*/
+	.start_ctrl = NULL,
+};
+
+static struct si2168b_config hauppauge_si2168b_2_config = {
+	/* the demodulator's i2c address */
+	.demod_address = 0xCC >> 1,
+
+	/* minimum delay before retuning */
+	.min_delay_ms = 85,
+	.ts_bus_mode = 1, /*1-serial, 2-parallel.*/
+	.ts_clock_mode = 1, /*0-auto_fixed, 1-auto_adapt, 2-manual.*/
+	.clk_gapped_en = 1, /*0-disabled, 1-enabled.*/
+	.ts_par_clk_invert = 1, /*0-not-invert, 1-invert*/
+	.ts_par_clk_shift = 1, /*DVB-C QAM256 fix*/
+	.fef_mode = 1, /* needs to match tuner */
+	.fef_pin = 3,
+	.fef_level = 0,
+	.indirect_i2c_connection = 1, /*Si2157 connected directly*/
+	.start_ctrl = NULL,
+};
+
+static struct silabs_tercab_config hauppauge_si2157_config = {
+	.tuner_address           = 0xC0 >> 1,      /* address of the tuner for ATSC/DVB-T */
+	.qam_if_khz              = HVR19x5_QAM_IF, /* needs to match demods qam if */
+	.vsb_if_khz              = HVR19x5_VSB_IF, /* needs to match demods vsb if */
+	.tuner_clock_control     = 1, /* 0:always off 1:always on 2:clock managed */
+	.tuner_agc_control       = 1,
+	.fef_mode                = 1, /* fef mode slow normal agc */
+	.crystal_trim_xo_cap     = 8,
+	.indirect_i2c_connection = 1, /* Si2157 connected directly */
 };
 
 static int saa7164_dvb_stop_port(struct saa7164_port *port)
@@ -531,6 +623,33 @@ int saa7164_dvb_register(struct saa7164_port *port)
 			}
 		}
 
+		break;
+	case SAA7164_BOARD_HAUPPAUGE_HVR2255:
+		i2c_bus = &dev->i2c_bus[port->nr + 1];
+
+		port->dvb.frontend = dvb_attach(lgdt3306a_attach,
+			(port->nr == 0) ?
+			&hauppauge_lgdt3306a_1_config : &hauppauge_lgdt3306a_2_config,
+			&i2c_bus->i2c_adap);
+
+		if (port->dvb.frontend != NULL) {
+			dvb_attach(silabs_tercab_attach, port->dvb.frontend,
+				&i2c_bus->i2c_adap,	&hauppauge_si2157_config);
+		}
+		break;
+	case SAA7164_BOARD_HAUPPAUGE_HVR2205:
+	case SAA7164_BOARD_HAUPPAUGE_HVR2215:
+		i2c_bus = &dev->i2c_bus[port->nr + 1];
+
+		port->dvb.frontend = dvb_attach(si2168b_attach,
+			(port->nr == 0) ?
+			&hauppauge_si2168b_1_config : &hauppauge_si2168b_2_config,
+			&i2c_bus->i2c_adap);
+
+		if (port->dvb.frontend != NULL) {
+			dvb_attach(silabs_tercab_attach, port->dvb.frontend,
+				&i2c_bus->i2c_adap,	&hauppauge_si2157_config);
+		}
 		break;
 	default:
 		printk(KERN_ERR "%s: The frontend isn't supported\n",

@@ -353,6 +353,9 @@ int cx231xx_afe_update_power_control(struct cx231xx *dev,
 	case CX231XX_BOARD_CNXT_RDU_253S:
 	case CX231XX_BOARD_CNXT_VIDEO_GRABBER:
 	case CX231XX_BOARD_HAUPPAUGE_EXETER:
+	case CX231XX_BOARD_HAUPPAUGE_EXETER_955Q:
+	case CX231XX_BOARD_HAUPPAUGE_935C:
+	case CX231XX_BOARD_HAUPPAUGE_975:
 	case CX231XX_BOARD_HAUPPAUGE_USBLIVE2:
 	case CX231XX_BOARD_PV_PLAYTV_USB_HYBRID:
 	case CX231XX_BOARD_HAUPPAUGE_USB2_FM_PAL:
@@ -597,7 +600,7 @@ int cx231xx_set_video_input_mux(struct cx231xx *dev, u8 input)
 				return status;
 			}
 		}
-		if (dev->tuner_type == TUNER_NXP_TDA18271)
+		if (dev->tuner_type == TUNER_NXP_TDA18271 || dev->tuner_type == TUNER_SILABS_TERCAB)
 			status = cx231xx_set_decoder_video_input(dev,
 							CX231XX_VMUX_TELEVISION,
 							INPUT(input)->vmux);
@@ -904,7 +907,7 @@ int cx231xx_set_decoder_video_input(struct cx231xx *dev,
 
 			status = vid_blk_write_word(dev, AFE_CTRL, value);
 
-			if (dev->tuner_type == TUNER_NXP_TDA18271) {
+			if (dev->tuner_type == TUNER_NXP_TDA18271 /*|| dev->tuner_type == TUNER_SI2157*/) {
 				status = vid_blk_read_word(dev, PIN_CTRL,
 				 &value);
 				status = vid_blk_write_word(dev, PIN_CTRL,
@@ -1195,6 +1198,7 @@ int cx231xx_set_audio_decoder_input(struct cx231xx *dev,
 					cx231xx_set_field(FLD_SIF_EN, 1));
 			break;
 		case TUNER_NXP_TDA18271:
+		/*case TUNER_SI2157:*/
 			/* Normal mode: SIF passthrough at 14.32 MHz */
 			status = cx231xx_read_modify_write_i2c_dword(dev,
 					VID_BLK_I2C_ADDRESS,
@@ -1206,7 +1210,7 @@ int cx231xx_set_audio_decoder_input(struct cx231xx *dev,
 			/* This is just a casual suggestion to people adding
 			   new boards in case they use a tuner type we don't
 			   currently know about */
-			printk(KERN_INFO "Unknown tuner type configuring SIF");
+			printk(KERN_INFO "Unknown tuner type %d configuring SIF", dev->board.tuner_type);
 			break;
 		}
 		break;
@@ -1721,6 +1725,9 @@ int cx231xx_dif_set_standard(struct cx231xx *dev, u32 standard)
 	case CX231XX_BOARD_CNXT_RDU_250:
 	case CX231XX_BOARD_CNXT_VIDEO_GRABBER:
 	case CX231XX_BOARD_HAUPPAUGE_EXETER:
+	case CX231XX_BOARD_HAUPPAUGE_EXETER_955Q:
+	case CX231XX_BOARD_HAUPPAUGE_935C:
+	case CX231XX_BOARD_HAUPPAUGE_975:
 	case CX231XX_BOARD_OTG102:
 		func_mode = 0x03;
 		break;
@@ -2120,13 +2127,13 @@ int cx231xx_tuner_post_channel_change(struct cx231xx *dev)
 
 	if (dev->norm & (V4L2_STD_SECAM_L | V4L2_STD_SECAM_B |
 			 V4L2_STD_SECAM_D)) {
-			if (dev->tuner_type == TUNER_NXP_TDA18271) {
+			if (dev->tuner_type == TUNER_NXP_TDA18271 /*|| dev->tuner_type == TUNER_SI2157*/) {
 				dwval &= ~FLD_DIF_IF_REF;
 				dwval |= 0x88000300;
 			} else
 				dwval |= 0x88000000;
 		} else {
-			if (dev->tuner_type == TUNER_NXP_TDA18271) {
+			if (dev->tuner_type == TUNER_NXP_TDA18271 /*|| dev->tuner_type == TUNER_SI2157*/) {
 				dwval &= ~FLD_DIF_IF_REF;
 				dwval |= 0xCC000300;
 			} else
@@ -2388,7 +2395,7 @@ int cx231xx_set_power_mode(struct cx231xx *dev, enum AV_MODE mode)
 			 * Enable tuner
 			 *	Hauppauge Exeter seems to need to do something different!
 			 */
-			if (dev->model == CX231XX_BOARD_HAUPPAUGE_EXETER)
+			if (dev->model == CX231XX_BOARD_HAUPPAUGE_EXETER)// || dev->model == CX231XX_BOARD_HAUPPAUGE_EXETER_955Q)
 				cx231xx_enable_i2c_port_3(dev, false);
 			else
 				cx231xx_enable_i2c_port_3(dev, true);

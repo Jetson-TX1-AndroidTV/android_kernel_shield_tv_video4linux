@@ -432,6 +432,13 @@ config DVB_RTL2832
 	help
 	  Say Y when you want to support this frontend.
 
+config DVB_SI2168B
+	tristate "Silicon Labs Si2168B"
+	depends on DVB_CORE && I2C && I2C_MUX
+	default m if !MEDIA_SUBDRV_AUTOSELECT
+	help
+	  Say Y when you want to support this frontend.
+
 comment "DVB-C (cable) frontends"
 	depends on DVB_CORE
 
@@ -643,6 +650,14 @@ config DVB_TUNER_DIB0090
 
 comment "SEC control devices for DVB-S"
 	depends on DVB_CORE
+
+config DVB_SILG
+	tristate "SILG SiLabs + LG Dual Demodulator"
+	depends on DVB_CORE && I2C
+	default m if !MEDIA_SUBDRV_AUTOSELECT
+	help
+	  A DVB-T/T2/C + ATSC demodulator module. Say Y when
+	  you want to support this frontend.
 
 config DVB_LNBP21
 	tristate "LNBP21/LNBH24 SEC controllers"

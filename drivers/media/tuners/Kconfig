@@ -229,6 +229,13 @@ config MEDIA_TUNER_SI2157
 	help
 	  Silicon Labs Si2157 silicon tuner driver.
 
+config MEDIA_TUNER_SILABS_TERCAB
+	tristate "Silicon Labs terrestrial/cable tuner series"
+	depends on MEDIA_SUPPORT && I2C
+	default m if !MEDIA_SUBDRV_AUTOSELECT
+	help
+	  Silicon Labs hybrid terrestrial/cable tuner series driver.
+
 config MEDIA_TUNER_IT913X
 	tristate "ITE Tech IT913x silicon tuner"
 	depends on MEDIA_SUPPORT && I2C

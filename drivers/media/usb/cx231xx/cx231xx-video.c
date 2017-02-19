@@ -1199,7 +1199,7 @@ int cx231xx_s_frequency(struct file *file, void *priv,
 	/* set post channel change settings in DIF first */
 	rc = cx231xx_tuner_post_channel_change(dev);
 
-	if (dev->tuner_type == TUNER_NXP_TDA18271) {
+	if (dev->tuner_type == TUNER_NXP_TDA18271 || dev->tuner_type == TUNER_SILABS_TERCAB) {
 		if (dev->norm & (V4L2_STD_MN | V4L2_STD_NTSC_443))
 			if_frequency = 5400000;  /*5.4MHz	*/
 		else if (dev->norm & V4L2_STD_B)

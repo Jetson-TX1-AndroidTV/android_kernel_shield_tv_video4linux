@@ -386,6 +386,9 @@ struct pvr2_hdw {
 
 	struct pvr2_ctrl *controls;
 	unsigned int control_cnt;
+
+	/* experimental... */
+	int (*fe_ts_bus_ctrl) (struct dvb_frontend*, int);
 };
 
 /* This function gets the current frequency */

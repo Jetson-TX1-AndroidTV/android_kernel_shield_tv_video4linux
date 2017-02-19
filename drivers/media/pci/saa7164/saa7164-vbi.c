@@ -28,6 +28,24 @@ static struct saa7164_tvnorm saa7164_tvnorms[] = {
 	}, {
 		.name      = "NTSC-JP",
 		.id        = V4L2_STD_NTSC_M_JP,
+	}, {
+		.name      = "NTSC-443",
+		.id        = V4L2_STD_NTSC_443,
+	}, {
+		.name      = "PAL-BG",
+		.id        = V4L2_STD_PAL_BG,
+	}, {
+		.name      = "PAL-I",
+		.id        = V4L2_STD_PAL_I,
+	}, {
+		.name      = "PAL-DK",
+		.id        = V4L2_STD_PAL_DK,
+	}, {
+		.name      = "SECAM-L",
+		.id        = V4L2_STD_SECAM_L,
+	}, {
+		.name      = "SECAM-Lc",
+		.id        = V4L2_STD_SECAM_LC,
 	}
 };
 
@@ -355,6 +373,58 @@ static int vidioc_s_frequency(struct file *file, void *priv,
 
 	saa7164_vbi_initialize(port);
 
+	return 0;
+}
+
+static int vidioc_s_std(struct file *file, void *priv, v4l2_std_id id)
+{
+	struct saa7164_vbi_fh *fh = file->private_data;
+	struct saa7164_port *port = fh->port;
+	struct saa7164_dev *dev = port->dev;
+	struct v4l2_frequency vf;
+	unsigned int i;
+	int ret;
+
+	dprintk(DBGLVL_VBI, "%s(id=0x%x)\n", __func__, (u32)id);
+
+	for (i = 0; i < ARRAY_SIZE(saa7164_tvnorms); i++) {
+		if ((id & saa7164_tvnorms[i].id) == id)
+			break;
+	}
+	if (i == ARRAY_SIZE(saa7164_tvnorms))
+		return -EINVAL;
+
+	port->encodernorm = saa7164_tvnorms[i];
+
+	/* input from analog tuner and change of standard? */
+	if (port->mux_input == 1 && id != port->std) {
+		port->std = id;
+		/* tune again */
+		vf.tuner     = 0;
+		vf.type      = V4L2_TUNER_ANALOG_TV;
+		vf.frequency = port->freq;
+		ret = vidioc_s_frequency(file, priv, &vf);
+		if (ret)
+			return ret;
+	} else {
+		port->std = id;
+		/* Update the audio decoder while is not running in
+		 * auto detect mode.
+		 */
+		saa7164_api_set_audio_std(port);
+	}
+
+	dprintk(DBGLVL_VBI, "%s(id=0x%x) OK\n", __func__, (u32)id);
+
+	return 0;
+}
+
+static int vidioc_g_std(struct file *file, void *priv, v4l2_std_id *id)
+{
+	struct saa7164_encoder_fh *fh = file->private_data;
+	struct saa7164_port *port = fh->port;
+
+	*id = port->std;
 	return 0;
 }
 
