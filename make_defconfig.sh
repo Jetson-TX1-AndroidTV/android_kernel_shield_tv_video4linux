@@ -3,25 +3,25 @@
 DEFCONFIG_FILE=$1
 
 if [ -z "$DEFCONFIG_FILE" ]; then
-	echo "Need defconfig file(tegra21_android_defconfig)!"
+	echo "Need defconfig file(tegra12_android_defconfig)!"
 	exit -1
 fi
 
-if [ ! -e arch/arm64/configs/$DEFCONFIG_FILE ]; then
-	echo "No such file : arch/arm64/configs/$DEFCONFIG_FILE"
+if [ ! -e arch/arm/configs/$DEFCONFIG_FILE ]; then
+	echo "No such file : arch/arm/configs/$DEFCONFIG_FILE"
 	exit -1
 fi
 
 # make .config
 env KCONFIG_NOTIMESTAMP=true \
-make ARCH=arm64 CROSS_COMPILE=aarch64-linux-android- ${DEFCONFIG_FILE}
+make ARCH=arm CROSS_COMPILE=arm-eabi- ${DEFCONFIG_FILE}
 
 # run menuconfig
 env KCONFIG_NOTIMESTAMP=true \
-make menuconfig ARCH=arm64
+make menuconfig ARCH=arm
 
-make savedefconfig ARCH=arm64
+make savedefconfig ARCH=arm
 # copy .config to defconfig
-mv defconfig arch/arm64/configs/${DEFCONFIG_FILE}
+mv defconfig arch/arm/configs/${DEFCONFIG_FILE}
 # clean kernel object
 make mrproper

@@ -23,7 +23,7 @@
 
 #define DC_CTRL_MODE	TEGRA_DC_OUT_CONTINUOUS_MODE
 
-#ifndef CONFIG_TEGRA_HDMI_PRIMARY
+#ifdef CONFIG_TEGRA_HDMI_PRIMARY
 static struct resource all_disp1_resources[] = {
 	{
 		/* keep fbmem as first variable in array for

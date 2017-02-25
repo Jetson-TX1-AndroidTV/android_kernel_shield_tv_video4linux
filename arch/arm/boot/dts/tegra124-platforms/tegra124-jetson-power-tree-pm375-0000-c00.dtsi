@@ -25,15 +25,6 @@
 	host1x {
 		/* tegradc.0 */
 		dc@54200000 {
-			avdd_dsi_csi-supply = <&as3722_ldo2>;
-			avdd_lcd-supply = <&as3722_gpio4_supply>;
-			dvdd_lcd-supply = <&reg_1v8_supply>;
-			vdd_lcd_bl-supply = <&vdd_lcd_bl>;
-			vdd_lcd_bl_en-supply = <&vdd_lcd_bl_en>;
-		};
-
-		/* tegradc.1 */
-		dc@54240000 {
 			avdd_hdmi-supply = <&as3722_sd4>;
 			avdd_hdmi_pll-supply = <&avdd_hdmi_pll>;
 			vdd_hdmi_5v0-supply = <&vdd_hdmi>;
