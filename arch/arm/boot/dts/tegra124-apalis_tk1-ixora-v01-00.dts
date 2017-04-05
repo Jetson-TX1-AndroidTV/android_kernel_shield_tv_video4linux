@@ -1,0 +1,284 @@
+/*
+ * arch/arm/boot/dts/tegra124-apalis-eval.dts
+ *
+ * Copyright (c) 2017, NVIDIA CORPORATION.  All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+ */
+
+/dts-v1/;
+
+#include "tegra124-soc-shield.dtsi"
+#include "tegra124-platforms/tegra124-apalis-keys.dtsi"
+#include "tegra124-platforms/tegra124-apalis-gpio.dtsi"
+#include "tegra124-platforms/tegra124-apalis-pinmux.dtsi"
+#include "tegra124-platforms/tegra124-apalis-pmic.dtsi"
+#include "tegra124-platforms/tegra124-apalis-fixed.dtsi"
+#include "tegra124-platforms/tegra124-apalis-hdmi.dtsi"
+#include "tegra124-platforms/tegra124-apalis-power-tree.dtsi"
+
+/ {
+	model = "NVIDIA Tegra124 PM375";
+	compatible = "nvidia,jetson-tk1", "nvidia,tegra124";
+	nvidia,dtsfilename = __FILE__;
+	#address-cells = <2>;
+	#size-cells = <2>;
+
+	chosen {
+		bootargs = "tegraid=40.0.0.00.00 vmalloc=256M video=tegrafb console=ttyS0,115200n8 earlyprintk";
+	};
+
+	firmware {
+		android {
+			compatible = "android,firmware";
+			hardware = "tegra";
+		};
+	};
+
+	psci {
+		status = "disabled";
+	};
+
+	host1x {
+		/* tegradc.0 */
+		dc@54200000 {
+			status = "okay";
+			nvidia,dc-flags = <TEGRA_DC_FLAG_ENABLED>;
+			nvidia,emc-clk-rate = <300000000>;
+			nvidia,cmu-enable = <1>;
+			nvidia,fb-bpp = <32>; /* bits per pixel */
+			nvidia,fb-flags = <TEGRA_FB_FLIP_ON_PROBE>;
+		};
+		hdmi {
+			hdmi-display {
+				nvidia,hdmi-vrr-caps = <1>;
+			};
+		};
+	};
+
+	pinmux@70000868 {
+                pinctrl-names = "default", "drive", "unused", "suspend";
+                pinctrl-3 = <&pinmux_suspend>;
+
+                /* Change the pin dap_mclk1_req to required configurations */
+                unused_lowpower {
+                        dap_mclk1_req_pee2 {
+                        nvidia,pins = "dap_mclk1_req_pee2";
+                        nvidia,function = "sata";
+                        nvidia,enable-input = <TEGRA_PIN_DISABLE>;
+                        nvidia,pull = <TEGRA_PIN_PULL_NONE>;
+                        nvidia,tristate = <TEGRA_PIN_DISABLE>;
+                        };
+                };
+
+                /* On suspend, make dap_mclk1_req to pull up */
+                pinmux_suspend: pins_on_suspend {
+                dap_mclk1_req_pee2 {
+                        nvidia,pins = "dap_mclk1_req_pee2";
+                        nvidia,pull = <TEGRA_PIN_PULL_UP>;
+                        };
+                };
+        };
+
+	bcmdhd_wlan {
+		edp-consumer-name = "primary-wifi";
+	};
+
+	bcmdhd_wlan {
+		fw_path = "/system/vendor/firmware/fw_bcmdhd.bin";
+		nv_path = "/system/etc/nvram_apalis-tk1_4356.txt";
+		country_code_map {
+			CC1 {
+				iso_abbrev = "XR";
+				custom_locale = "XR";
+				custom_locale_rev = <122>;
+			};
+		};
+	};
+
+	/* Apalis UART1 */
+	serial@70006000 {
+		compatible = "nvidia,tegra114-uart", "nvidia,tegra20-uart";
+		status = "okay";
+	};
+
+	/* Apalis UART2 */
+	serial@70006040 {
+		compatible = "nvidia,tegra114-hsuart";
+		status = "okay";
+	};
+
+	/* Apalis UART3 */
+	serial@70006200 {
+		compatible = "nvidia,tegra114-hsuart";
+		status = "okay";
+	};
+
+	/* Apalis UART4 */
+	serial@70006300 {
+		compatible = "nvidia,tegra114-hsuart";
+		status = "okay";
+
+	};
+
+	i2c@7000d000 {
+		nvidia,bit-banging-xfer-after-shutdown;
+
+		as3722@40 {
+			adc_extcon {
+				ams,extcon-name = "as3722-extcon";
+			};
+		};
+	};
+
+	memory@0x80000000 {
+		device_type = "memory";
+		reg = <0x0 0x80000000 0x0 0x80000000>;
+	};
+
+	/* SPI1: Apalis SPI1 */
+	spi@7000d400 {
+		status = "okay";
+		spi-max-frequency = <25000000>;
+
+		spidev0: spidev@0 {
+			compatible = "spidev";
+			reg = <0>;
+			spi-max-frequency = <25000000>;
+		};
+	};
+
+	/* SPI2: MCU SPI */
+	spi@7000d600 {
+		status = "okay";
+		spi-max-frequency = <25000000>;
+
+		spidev1: spidev@1 {
+			compatible = "spidev";
+			reg = <1>;
+			spi-max-frequency = <12000000>;
+		};
+
+		spidev2: spidev@2 {
+			compatible = "spidev";
+			reg = <2>;
+			spi-max-frequency = <2000000>;
+		};
+	};
+
+	/* SPI4: Apalis SPI2 */
+	spi@7000da00 {
+		status = "okay";
+		spi-max-frequency = <25000000>;
+
+		spidev3: spidev@0 {
+			compatible = "spidev";
+			reg = <0>;
+			spi-max-frequency = <25000000>;
+		};
+	};
+
+	pcie-controller {
+		hvdd-pex-supply = <&reg_3v3_supply>;
+		hvdd-pex-pll-e-supply = <&reg_3v3_supply>;
+		dvddio-pex-supply = <&as3722_sd4>;
+		avddio-pex-supply = <&as3722_sd4>;
+		avdd-pex-pll-supply = <&as3722_sd4>;
+		vddio-pex-ctl-supply = <&as3722_sd4>;
+		nvidia,lane-map = <0x12>;
+		status = "okay";
+
+		/* Apalis PCIe (additional lane Apalis type specific) */
+		pci@1,0 {
+			nvidia,disable-clock-request;
+			status = "okay";
+		};
+
+		/* I210 Gigabit Ethernet Controller (On-module) */
+		pci@2,0 {
+			nvidia,disable-clock-request;
+			status = "okay";
+		};
+	};
+
+	sata@70020000 {
+		nvidia,enable-sata-port;
+		nvidia,sata-connector-type=<STANDARD_SATA>;
+		vdd_sata-supply = <&as3722_sd4>;
+		avdd_sata_pll-supply =<&as3722_sd4>;
+		avdd_sata-supply = <&as3722_sd4>;
+		hvdd_sata-supply = <&reg_3v3_supply>;
+		vddio_pex_sata-supply = <&reg_3v3_supply>;
+		status = "okay";
+	};
+
+	extcon {
+		extcon@0 {
+			status = "disabled";
+		};
+	};
+
+	udc@7d000000 {
+		nvidia,port-otg;
+		nvidia,charging-supported;
+		#extcon-cells = <1>;
+		status = "okay";
+	};
+
+        otg@7d000000 {
+		#extcon-cells = <1>;
+		status = "okay";
+	};
+
+	xusb_pad_ctl: xusb_padctl { /* Put common control config here */
+		nvidia,ss_portmap = <0x21>;
+		nvidia,lane_owner = <6>; /* Use 0xF to disable lane assign */
+		nvidia,lane-map = <0x12>;
+		nvidia,enable-sata-port;
+		status = "okay";
+	};
+
+	xusb@70090000 {
+		/* nvidia,uses_external_pmic;
+		/* nvidia,gpio_controls_muxed_ss_lanes; */
+		nvidia,gpio_ss1_sata = <0>;
+		nvidia,ulpicap = <0>; /* No ulpi support. can we remove */
+		/* nvidia,supply_utmi_vbuses = "usb_vbus0", "usb_vbus1", "usb_vbus2";
+		nvidia,supply_s3p3v = "hvdd_usb";
+		nvidia,supply_s1p8v = "avdd_pll_utmip";
+		nvidia,supply_s1p05v = "avddio_usb"; */
+		nvidia,portmap = <0x0e03>;
+		nvidia,common_padctl = <&xusb_pad_ctl>;
+		status = "okay";
+	};
+
+	xudc@700d0000 {
+		nvidia,common_padctl = <&xusb_pad_ctl>;
+		nvidia,portmap = <0x0108>;
+		#extcon-cells = <1>;
+		status = "disabled";
+	};
+
+	xotg {
+		#extcon-cells = <1>;
+		nvidia,common_padctl = <&xusb_pad_ctl>;
+		status = "disabled";
+	};
+
+	backlight {
+		compatible = "pwm-backlight";
+		status = "okay";
+	};
+};

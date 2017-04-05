@@ -197,6 +197,7 @@ dtb-$(CONFIG_ARCH_TEGRA) += tegra20-harmony.dtb \
 	tegra30-cardhu-a04.dtb \
 	tegra114-dalmore.dtb \
 	tegra114-pluto.dtb \
+	tegra124-apalis_tk1-ixora-v01-00.dts \
 	tegra124-ardbeg-e1792-1100-a00-00.dtb \
 	tegra124-ardbeg-e1792-1100-a00-01.dtb \
 	tegra124-ardbeg-e1780-1000-a00-00.dtb \

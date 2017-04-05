@@ -1,0 +1,68 @@
+#include <dt-bindings/gpio/tegra-gpio.h>
+
+/ {
+	gpio: gpio@6000d000 {
+		gpio-init-names = "default";
+		gpio-init-0 = <&gpio_default>;
+
+		gpio_default: default {
+			gpio-input = <
+				TEGRA_GPIO(A, 1)
+				TEGRA_GPIO(B, 1)
+				TEGRA_GPIO(I, 5)
+				TEGRA_GPIO(I, 6)
+				TEGRA_GPIO(J, 0)
+				TEGRA_GPIO(J, 2)
+				TEGRA_GPIO(K, 2)
+				TEGRA_GPIO(K, 7)
+				TEGRA_GPIO(N, 7)
+				TEGRA_GPIO(O, 5)
+				TEGRA_GPIO(V, 3)
+				TEGRA_GPIO(V, 4)
+				TEGRA_GPIO(V, 5)
+				TEGRA_GPIO(W, 3)
+				TEGRA_GPIO(W, 5)
+				TEGRA_GPIO(BB, 0)
+				TEGRA_GPIO(BB, 4)
+				TEGRA_GPIO(CC, 5)
+				TEGRA_GPIO(DD, 1)
+				TEGRA_GPIO(DD, 2)
+				TEGRA_GPIO(DD, 3)
+				TEGRA_GPIO(DD, 5)
+				TEGRA_GPIO(DD, 6)
+				TEGRA_GPIO(EE, 3)
+				TEGRA_GPIO(EE, 5)
+				TEGRA_GPIO(FF, 0)
+				TEGRA_GPIO(FF, 1)
+				TEGRA_GPIO(FF, 2)
+				>;
+			gpio-output-low = <
+				TEGRA_GPIO(C, 0)
+				TEGRA_GPIO(Q, 0) /* Shift_CTRL_OE[0] */
+				TEGRA_GPIO(Q, 1) /* Shift_CTRL_OE[1] */
+				TEGRA_GPIO(Q, 2) /* Shift_CTRL_OE[2] */
+				TEGRA_GPIO(Q, 4) /* Shift_CTRL_OE[4] */
+				TEGRA_GPIO(R, 0) /* Shift_CTRL_Dir_In[0] */
+				TEGRA_GPIO(R, 1) /* Shift_CTRL_Dir_In[1] */
+				TEGRA_GPIO(R, 2) /* Shift_CTRL_OE[3] */
+				TEGRA_GPIO(S, 3) /* Shift_CTRL_Dir_In[2] */
+				TEGRA_GPIO(BB, 3)
+				TEGRA_GPIO(BB, 6)
+				>;
+			gpio-output-high = <
+				TEGRA_GPIO(N, 2)
+				TEGRA_GPIO(N, 4)
+				TEGRA_GPIO(N, 5)
+#if 0
+				TEGRA_GPIO(O, 6) /* LAN_DEV_OFF# */
+#endif
+				TEGRA_GPIO(Q, 5) /* Shift_CTRL_Dir_Out[0] */
+				TEGRA_GPIO(Q, 6) /* Shift_CTRL_Dir_Out[1] */
+				TEGRA_GPIO(Q, 7) /* Shift_CTRL_Dir_Out[2] */
+				TEGRA_GPIO(S, 2) /* LAN_RESET# */
+				TEGRA_GPIO(U, 4)
+				TEGRA_GPIO(BB, 5)
+				>;
+		};
+	};
+};
