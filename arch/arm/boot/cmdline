@@ -1,0 +1,1 @@
+cros_secure console=tty1 init=/sbin/init root=PARTUUID=da7e5d5f-d104-8143-ad39-d25a28d04eb5/PARTNROFF=1 rootwait rw noinitrd lsm.module_locking=0 

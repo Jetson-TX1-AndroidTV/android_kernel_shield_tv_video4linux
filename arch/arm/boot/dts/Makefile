@@ -217,6 +217,7 @@ dtb-$(CONFIG_ARCH_TEGRA) += tegra20-harmony.dtb \
 	tegra124-jetson_tk1-pm375-000-c00-00.dtb \
 	tegra124-norrin-pm374-0001-a00-00.dtb \
 	tegra124-norrin-pm374-0001-a01-00.dtb \
+	tegra124-nyan-big_tk1-android-v01-00.dtb \
 	tegra124-loki.dtb \
 	tegra124-loki-02-cell-battery.dtb \
 	tegra124-loki-03-cell-battery.dtb \
