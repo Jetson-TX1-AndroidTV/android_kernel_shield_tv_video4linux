@@ -197,7 +197,7 @@
 		avddio-pex-supply = <&as3722_sd4>;
 		avdd-pex-pll-supply = <&as3722_sd4>;
 		vddio-pex-ctl-supply = <&as3722_sd4>;
-		nvidia,lane-map = <0x12>;
+		nvidia,lane-map = <0x10>;
 		status = "okay";
 
 		/* Apalis PCIe (additional lane Apalis type specific) */
@@ -245,7 +245,7 @@
 	xusb_pad_ctl: xusb_padctl { /* Put common control config here */
 		nvidia,ss_portmap = <0x21>;
 		nvidia,lane_owner = <6>; /* Use 0xF to disable lane assign */
-		nvidia,lane-map = <0x12>;
+		nvidia,lane-map = <0x10>;
 		nvidia,enable-sata-port;
 		status = "okay";
 	};
